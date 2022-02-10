@@ -2,13 +2,18 @@
 library(gprofiler2)
 library(dplyr)
 
-run.gost <- function(genes.symbol, domain, reactome.gmt, bioplanet.gmt){
-  res <- list()
-  res[["reactome"]] <- gost(query = genes.symbol, organism = reactome.gmt, user_threshold = 0.05, 
-                            significant = F,  correction_method = "fdr", evcodes = T, custom_bg = domain)
-  res[["bioplanet"]] <- gost(query = genes.symbol, organism = bioplanet.gmt, user_threshold = 0.05,
-                             significant = F, correction_method = "fdr", evcodes = T, custom_bg = domain)
-  return(res)
+run.gost <- function(genes.symbol, domain, gmt.list){
+  lapply(gmt.list, function(gmt){
+    gost(
+      query = genes.symbol,
+      organism = gmt,
+      user_threshold = 0.05,
+      significant = F,
+      correction_method = "fdr",
+      evcodes = T,
+      custom_bg = domain
+    )
+  })
 }
 
 # Convert a list of Gost Analysis result to a list of Data Frame containing the column in the Generic Enrichment Map (GEM)

@@ -111,7 +111,7 @@ count_metadata$condition <- as.factor(count_metadata$condition)
 
 Perform a differential analysis for each PDCL in the database against the controls.
 
-```{r deseq2, cache=TRUE}
+```{r deseq2, cache=TRUE, message=FALSE}
 deseq2_res_list <- lapply(pdcl_names, function(pdcl){
   dataset_pdcl <- c(control_names, pdcl)
   # Subract a dataset which contains only the counts for the
@@ -144,24 +144,19 @@ for (pdcl in pdcl_names){
 
 # 2. GSEA Analysis for DESeq2 result
 
-Message from Jorge :
-
-We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
-
-```{r}
-set.seed(1)
-```
-
 Load GMT files for GSEA pathway enrichment.
 
 ```{r}
 reactome_gmt_file <- gmtPathways("Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt")
-bioplanet_gmt_file <- gmtPathways("Data/gene-set/jorge-gmt/bioplanet_gmt_symbol_no_unwanted_categ_no_less_10.gmt")
+gsea_gmt_list <- list(reactome = reactome_gmt_file)
 ```
 
 Run GSEA for DESeq2 result
 
-```{r gsea, cache=TRUE, dependson="deseq2", include=FALSE}
+Message from Jorge :
+We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
+```{r gsea, cache=TRUE, dependson="deseq2", message=FALSE}
+set.seed(1)
 # Create the ranked list for GSEA
 rank_list <- lapply(deseq2_res_list, function(x){
   rnk <- x$log2FoldChange
@@ -169,7 +164,7 @@ rank_list <- lapply(deseq2_res_list, function(x){
   rnk
 })
 # Run GSEA analysis for each ranked list for both Reactom and Bioplanet
-gsea_res_list <- lapply(rank_list, run.gsea, reactome_gmt_file, bioplanet_gmt_file)
+gsea_res_list <- lapply(rank_list, run.gsea, gsea_gmt_list)
 saveRDS(gsea_res_list, file = "gsea_pathway_enrichment.rds")
 gsea_gem <- lapply(gsea_res_list, convert.gsea.to.gem)
 save.gem.list.to.txt(gsea_gem, "Result/gsea/deseq2/", "deseq2")
@@ -192,6 +187,12 @@ reactome_gmt_token <- "gp__Nqmx_yxm7_37U"
 bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
 ```
 
+Create a list of GMT files.
+
+```{r}
+gprofiler_gmt_list <- list(reactome = reactome_gmt_token)
+```
+
 Load PENDA results
 
 ```{r}
@@ -205,15 +206,14 @@ names(penda_res) <- penda_pdcl_names
 
 Run G:Profiler for PENDA result
 
-```{r gprofiler, cache=TRUE}
+```{r gprofiler, cache=TRUE, message=FALSE}
 all_pdcl_genes <- row.names(penda_res)
 gost_res_list <- lapply(penda_res, function(pdcl){
   gene_list <- all_pdcl_genes[pdcl != 0]
   res <- run.gost(
-    gene_list, 
-    all_pdcl_genes, 
-    reactome_gmt_token, 
-    bioplanet_gmt_token
+    gene_list,
+    all_pdcl_genes,
+    gprofiler_gmt_list
   )
   return(res)
 })

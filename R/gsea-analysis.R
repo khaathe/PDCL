@@ -4,11 +4,10 @@ library(dplyr)
 library(tidyr)
 
 # run gsea analysis with reactome and bioplanet GMT files for a list of DE analysis result
-run.gsea <- function(ranked.list, reactome.gmt, bioplanet.gmt){
-  res <- list()
-  res[["reactome"]] <- fgsea(reactome.gmt, ranked.list, minSize=15, maxSize=500, nperm = 1000)
-  res[["bioplanet"]] <- fgsea(bioplanet.gmt, ranked.list, minSize=15, maxSize=500, nperm = 1000)
-  return(res)
+run.gsea <- function(ranked.list, gmt.list){
+  lapply(gmt.list, function(gmt){
+    fgsea(gmt, ranked.list, minSize=15, maxSize=500, nperm = 1000)
+  })
 }
 
 # Save a list of Generic Enrichment Map to tab delimited txt files
