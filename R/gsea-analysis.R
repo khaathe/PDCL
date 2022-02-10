@@ -23,14 +23,6 @@ save.gem.list.to.txt <- function(gem.list, save.dir, de.analysis){
   }
 }
 
-# Remove path and file extension from the file name and return only the analysis name
-# which is in the form : patientID_vs_control
-get.analysis.name <- function(file.name){
-  analysis.name <- sub("\\.\\w+", "", file.name, perl = T, ignore.case = T)
-  analysis.name <- sub(".+/(deseq2|limma)_", "", analysis.name, perl = T, ignore.case = T)
-  return(analysis.name)
-}
-
 # Convert a list of GSEA Analysis result to a list of Data Frame containing the column in the Generic Enrichment Map (GEM)
 # as described in GEM documentation (https://enrichmentmap.readthedocs.io/en/latest/FileFormats.html#generic-results-files)
 convert.gsea.to.gem <- function(res){
