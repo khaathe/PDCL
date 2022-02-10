@@ -1,8 +1,18 @@
 ---
 title: "PDCL Process"
+output:
+  pdf_document: 
+    fig_width: 10
+    fig_height: 7
+    highlight: kate
+  html_notebook: 
+    fig_width: 10
+    fig_height: 7
+    highlight: kate
+    toc: yes
 ---
 
-```{r echo=FALSE, include=FALSE}
+```{r, message=FALSE}
 # clean workspace
 rm(list=ls()) 
 
@@ -13,7 +23,6 @@ library(dplyr)
 # Source files with functions used in next steps
 source("R/gprofiler-analysis.R")
 source("R/gsea-analysis.R")
-source("R/common-deregulated-pathways.R")
 source("R/plot-result.R")
 ```
 
@@ -21,7 +30,7 @@ source("R/plot-result.R")
 
 ## Load controls
 
-```{r}
+```{r load-controls}
 control_file <- "Data/PDCL/astrocyte_GSE109001_counts_unique_genes_samples_filtered.txt"
 control <- read.table(
   control_file, 
@@ -49,7 +58,7 @@ control_names <- c(
 
 Load the PDCL count table. Disabled check.names otherwise it will add a X at the beginning of each column name, as column names aren't valid according to R.
 
-```{r}
+```{r load-pdcl}
 pdcl_count_table <- read.table(
   "/home/spinicck/PhD/Data/PDCL/lignees_count_genes_PDCL.txt", 
   sep = "\t", 
@@ -89,7 +98,7 @@ Create two data.frame:
 -   count_data : contain the raw counts of each genes for both control and PDCL samples
 -   count_metadata : metadata for associated with the samples to know which samples belong to the controls and which belong to the PDCL
 
-```{r}
+```{r prepare-count-data}
 # Merge control and PDCL counts into one dataframe
 count_data <- merge(control, pdcl_count_table, by.x = "symbol", by.y = "gene_id")
 # Associate each row with a gene symbol
@@ -111,7 +120,7 @@ count_metadata$condition <- as.factor(count_metadata$condition)
 
 Perform a differential analysis for each PDCL in the database against the controls.
 
-```{r deseq2, cache=TRUE, message=FALSE}
+```{r run-deseq2, cache=TRUE, message=FALSE}
 deseq2_res_list <- lapply(pdcl_names, function(pdcl){
   dataset_pdcl <- c(control_names, pdcl)
   # Subract a dataset which contains only the counts for the
@@ -133,7 +142,7 @@ names(deseq2_res_list) <- pdcl_names
 
 Save Result in rds file and write a csv file for each PDCL.
 
-```{r}
+```{r save-deseq2}
 saveRDS(deseq2_res_list, file = "deseq2_pdcl_vs_control.rds")
 for (pdcl in pdcl_names){
   res <- deseq2_res_list[[pdcl]]
@@ -146,16 +155,18 @@ for (pdcl in pdcl_names){
 
 Load GMT files for GSEA pathway enrichment.
 
-```{r}
+```{r create-gsea-gmt-list}
 reactome_gmt_file <- gmtPathways("Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt")
 gsea_gmt_list <- list(reactome = reactome_gmt_file)
 ```
 
 Run GSEA for DESeq2 result
 
-Message from Jorge :
+*Message from Jorge :*
+
 We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
-```{r gsea, cache=TRUE, dependson="deseq2", message=FALSE}
+
+```{r run-gsea, cache=TRUE, message=FALSE}
 set.seed(1)
 # Create the ranked list for GSEA
 rank_list <- lapply(deseq2_res_list, function(x){
@@ -174,7 +185,7 @@ save.gem.list.to.txt(gsea_gem, "Result/gsea/deseq2/", "deseq2")
 
 Upload GMT File before running G:Profiler Enrichment Analysis if needed.
 
-```{r}
+```{r upload-gmt-gprofiler}
 # This portion is commented because the file are already uploaded
 # reactome_gmt_token <- upload_GMT_file(gmtfile = "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt")
 # bioplanet_gmt_token <- upload_GMT_file(gmtfile = "Data/gene-set/jorge-gmt/bioplanet_gmt_symbol_no_unwanted_categ_no_less_10.gmt")
@@ -182,20 +193,20 @@ Upload GMT File before running G:Profiler Enrichment Analysis if needed.
 
 Define GMT token to use for Enrichment Analysis
 
-```{r}
+```{r define-gprofiler-gmt-token}
 reactome_gmt_token <- "gp__Nqmx_yxm7_37U"
 bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
 ```
 
 Create a list of GMT files.
 
-```{r}
+```{r create-gprofiler-gmt-list}
 gprofiler_gmt_list <- list(reactome = reactome_gmt_token)
 ```
 
 Load PENDA results
 
-```{r}
+```{r load-penda}
 penda_res_file <- "Data/PDCL/results_combine.csv"
 penda_res <- read.table(penda_res_file, sep = ";", header = T, row.names = 1, check.names = F)
 penda_pdcl_names <- names(penda_res)
@@ -206,7 +217,7 @@ names(penda_res) <- penda_pdcl_names
 
 Run G:Profiler for PENDA result
 
-```{r gprofiler, cache=TRUE, message=FALSE}
+```{r run-gprofiler, cache=TRUE, message=FALSE}
 all_pdcl_genes <- row.names(penda_res)
 gost_res_list <- lapply(penda_res, function(pdcl){
   gene_list <- all_pdcl_genes[pdcl != 0]
@@ -219,15 +230,10 @@ gost_res_list <- lapply(penda_res, function(pdcl){
 })
 ```
 
-Save Result in RDS
+Save Result in RDS and in Generic Enrichment Map (GEM) format
 
-```{r}
+```{r save-gprofiler}
 saveRDS(gost_res_list, file = "gprofiler_pathway_enrichment.rds")
-```
-
-Save Result in Generic Enrichment Map format
-
-```{r}
 gost_gem <- lapply(gost_res_list, convert.gost.to.gem)
 save.gem.list.to.txt(gost_gem, "Result/gprofiler/penda/", "penda")
 ```
@@ -238,7 +244,7 @@ save.gem.list.to.txt(gost_gem, "Result/gprofiler/penda/", "penda")
 
 Here we collapse the result from GProfiler and GSEA into one data.frame so it is easier to plot graph with ggplot.
 
-```{r}
+```{r collapse-results}
 db_source <- ("reactome")
 
 # Collapsed result into one dataframe.
@@ -272,7 +278,7 @@ collapsed_by_method <- collapse.data.by.method(collapsed_by_pathways)
 
 ## Plot Results with alpha = 0.05
 
-```{r}
+```{r threshold-5-percent}
 threshold <- 0.05
 
 # Find the pathway enriched in both GSEA and G:Profiler for each PDCL
@@ -283,7 +289,7 @@ result_by_method_0.05 <- all_result_by_method_0.05 %>% filter(fdr < threshold)
 count_0.05 <- result_by_method_0.05 %>% dplyr::count(method, pdcl, category, .drop = F)
 ```
 
-```{r}
+```{r gprofiler-vs-gsea-5-percent}
 gprofiler_vs_gsea_0.05 <- plot.gprofiler.vs.gsea(all_result_0.05)
 gprofiler_vs_gsea_0.05 
 ggsave(
@@ -294,7 +300,7 @@ ggsave(
 )
 ```
 
-```{r}
+```{r count-categories-5-percent}
 count_categories_0.05 <- plot.count.categories(result_by_method_0.05)
 count_categories_0.05 
 ggsave(
@@ -305,7 +311,7 @@ ggsave(
 )
 ```
 
-```{r}
+```{r count-pathways-5-percent}
 count_pathways_0.05 <- plot.count.pathways(result_by_method_0.05)
 count_pathways_0.05 
 ggsave(
@@ -316,7 +322,7 @@ ggsave(
 )
 ```
 
-```{r}
+```{r heatmap-pathways-5-percent, fig.width=12, fig.height=6}
 heatmap_pathways_0.05 <- heatmap.pathways(all_result_by_method_0.05)
 heatmap_pathways_0.05 
 ggsave(
@@ -327,7 +333,7 @@ ggsave(
 )
 ```
 
-```{r}
+```{r heatmap-categories-5-percent, fig.width=16, fig.height=10}
 heatmap_categories_0.05 <- heatmap.categories(count_0.05)
 heatmap_categories_0.05 
 ggsave(
@@ -340,7 +346,7 @@ ggsave(
 
 ## Plot Results with alpha = 0.1
 
-```{r}
+```{r threshold-10-percent}
 threshold <- 0.1
 
 # Find the pathway enriched in both GSEA and G:Profiler for each PDCL
@@ -351,7 +357,7 @@ result_by_method_0.1 <- all_result_by_method_0.1 %>% filter(fdr < threshold)
 count_0.1 <- result_by_method_0.1 %>% dplyr::count(method, pdcl, category, .drop = F)
 ```
 
-```{r}
+```{r gprofiler-vs-gsea-10-percent}
 gprofiler_vs_gsea_0.1 <- plot.gprofiler.vs.gsea(all_result_0.1)
 gprofiler_vs_gsea_0.1 
 ggsave(
@@ -362,7 +368,7 @@ ggsave(
 )
 ```
 
-```{r}
+```{r count-categories-10-percent}
 count_categories_0.1 <- plot.count.categories(result_by_method_0.1)
 count_categories_0.1 
 ggsave(
@@ -373,7 +379,7 @@ ggsave(
 )
 ```
 
-```{r}
+```{r countt-pathways-10-percent}
 count_pathways_0.1 <- plot.count.pathways(result_by_method_0.1)
 count_pathways_0.1 
 ggsave(
@@ -384,7 +390,7 @@ ggsave(
 )
 ```
 
-```{r}
+```{r heatmap-pathways, fig.width=16, fig.height=14}
 heatmap_pathways_0.1 <- heatmap.pathways(all_result_by_method_0.1)
 heatmap_pathways_0.1 
 ggsave(
@@ -395,7 +401,7 @@ ggsave(
 )
 ```
 
-```{r}
+```{r heatmap-categories-10-percent, fig.width=16, fig.height=10}
 heatmap_categories_0.1 <- heatmap.categories(count_0.1)
 heatmap_categories_0.1 
 ggsave(
