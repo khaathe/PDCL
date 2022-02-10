@@ -1,4 +1,8 @@
 Data/
 Result/
+pdcl_files/
+pdcl_cache/
+
+.Rhistory
 
 *.rds
