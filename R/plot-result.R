@@ -1,6 +1,7 @@
 ######## Load Library needed
 library(ggplot2)
 
+# Made by Jorge
 #Define undesired words
 undesired_words <- c("developmental","valproic acid","disease","\\breproduction\\b","^(?=.*stem)(?!.*recept).*$","hemostasis","congenital","mouse","\\srat(\\b|s\\b)","ataxia","^(?=.*(\\b|ch)l1(\\b|cam))(?!.*(adhesion|signal)).*$",
                      "\\bcrcp\\b","\\bvpr\\b","fibrin clot","\\bclotting\\b","bacteri","\\bhost","diabete","defective","parkinson","microb","alzheimer","salmonella",
@@ -18,6 +19,7 @@ undesired_words <- c("developmental","valproic acid","disease","\\breproduction\
                      "fibrino","\\bampa\\b","density lipoprotein","nep/ns2","\\bdectin","\\btube\\b","isotype","hodgkin and reed-sternberg","insulin resistance","hypertension",
                      "dysfunction","potentiation","\\bduct\\b","platelet","\\bph\\b","\\blectin\\b","\\bspike\\b","ossification","abacavir","phenylketonuria")
 
+# Made by Jorge
 #Define list of regexp that determine how pathways will be assigned into Reactome categories
 word_list <- list(
   #Autophagy
@@ -162,7 +164,7 @@ plot.gprofiler.vs.gsea <- function(x){
     scale_colour_manual(values = c("red", "grey30")) +
     facet_wrap(vars(pdcl)) +
     labs(
-      title = "pvalue G:Profiler against GSEA",
+      title = "G:Profiler against GSEA",
       subtitle = paste0("Threshold alpha : ", threshold),
       x = "-log10(pvalue G:Profiler)",
       y = "-log10(pvalue GSEA)",
@@ -183,7 +185,7 @@ plot.count.pathways <- function(x){
     geom_bar() +
     scale_fill_manual(values = c("red", "steelblue")) + 
     labs(
-      title = "Number of enriched pathways for each enrichment method",
+      title = "Number of enriched pathways per PDCL for each enrichment method",
       subtitle = paste0("Threshold alpha : ", threshold),
       x = "PDCL",
       y = "Counts",
@@ -209,8 +211,8 @@ plot.count.categories <- function(x){
     facet_wrap(~method) +
     labs(x = "Category name",
          y = "Counts",
-         title = "Total number of enriched pathways in a category for each enrichment method",
-         subtitle = "Pathway information source: Reactome + Bioplanet",
+         title = "Number of enriched pathways in a category for each enrichment method",
+         subtitle = paste0("Threshold alpha : ", threshold),
          fill = ""
     ) +
     theme(
@@ -257,9 +259,10 @@ heatmap.pathways <- function(x){
       size = 0.5
     ) +
     labs(
-      title = "Heatmap",
+      title = "FDR value for pathways enriched in both G:Profiler and GSEA",
       x = "PDCL",
-      y = "Pathway"
+      y = "Pathway",
+      fill = "FDR"
     ) +
     facet_wrap(vars(method)) +
     theme(axis.text.x = element_text(angle = 90) ) +
@@ -269,7 +272,9 @@ heatmap.pathways <- function(x){
       direction = -1
     ) +
     #We need to specify this. If not, unpopulated categories do not appear
-    scale_x_discrete(drop = F)
+    scale_x_discrete(drop = F) +
+    # By default it is sorted in desc order, we reverse it so it is in asc order
+    scale_y_discrete(limits=rev)
 }
 
 heatmap.categories <- function(x){
@@ -279,11 +284,14 @@ heatmap.categories <- function(x){
   ) + 
     geom_raster() +
     labs(
-      title = "Heatmap",
+      title = "Number of pathways enriched in each categories for each PDCL",
       x = "PDCL",
-      y = "Categories"
+      y = "Categories",
+      fill = "Count"
     ) +
     facet_wrap(~method) +
     scale_fill_viridis_c(direction = 1) +
-    theme(axis.text.x = element_text(angle = 90) )
+    theme(axis.text.x = element_text(angle = 90) ) +
+    # By default it is sorted in desc order, we reverse it so it is in asc order
+    scale_y_discrete(limits=rev)
 }
