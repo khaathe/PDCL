@@ -1,15 +1,16 @@
 ---
 title: "PDCL Process"
+author: "Kévin SPINICCI"
 output:
-  pdf_document: 
-    fig_width: 10
-    fig_height: 7
-    highlight: kate
   html_notebook: 
     fig_width: 10
     fig_height: 7
     highlight: kate
     toc: yes
+  pdf_document: 
+    fig_width: 10
+    fig_height: 7
+    highlight: kate
 ---
 
 ```{r setup-library, include=FALSE}
@@ -187,15 +188,17 @@ save.gem.list.to.txt(gsea_gem, "Result/gsea/deseq2/", "deseq2")
 
 Upload GMT File before running G:Profiler Enrichment Analysis if needed.
 
+Otherwise juste define the token of the GMT stored on G:Profiler website.
+
 ```{r upload-gmt-gprofiler}
 # This portion is commented because the file are already uploaded
-# reactome_gmt_token <- upload_GMT_file(gmtfile = "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt")
-# bioplanet_gmt_token <- upload_GMT_file(gmtfile = "Data/gene-set/jorge-gmt/bioplanet_gmt_symbol_no_unwanted_categ_no_less_10.gmt")
-```
+# reactome_gmt_token <- upload_GMT_file(gmtfile = 
+#  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
+# )
+# bioplanet_gmt_token <- upload_GMT_file(gmtfile = 
+#  "Data/gene-set/jorge-gmt/bioplanet_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
+# )
 
-Define GMT token to use for Enrichment Analysis
-
-```{r define-gprofiler-gmt-token}
 reactome_gmt_token <- "gp__Nqmx_yxm7_37U"
 bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
 ```
@@ -295,6 +298,10 @@ count_0.05 <- result_by_method_0.05 %>%
   dplyr::count(method, pdcl, category, .drop = F)
 ```
 
+### Plot GProfiler VS GSEA
+
+Here we plot the -log10 of the fdr of both method for each PDCL.
+
 ```{r gprofiler-vs-gsea-5-percent}
 gprofiler_vs_gsea_0.05 <- plot.gprofiler.vs.gsea(all_result_0.05)
 gprofiler_vs_gsea_0.05 
@@ -305,6 +312,8 @@ ggsave(
   height = 7
 )
 ```
+
+### Plot Number of enriched pathways per categories
 
 ```{r count-categories-5-percent}
 count_categories_0.05 <- plot.count.categories(result_by_method_0.05)
@@ -317,6 +326,8 @@ ggsave(
 )
 ```
 
+### Plot Number of enriched pathways per PDCL
+
 ```{r count-pathways-5-percent}
 count_pathways_0.05 <- plot.count.pathways(result_by_method_0.05)
 count_pathways_0.05 
@@ -328,6 +339,12 @@ ggsave(
 )
 ```
 
+### Heatmap of FDR values
+
+Here we plot a heatmap of the fdr values of a pathways for each PDCL for both method.
+
+Black rectangles indicates pathways that are enriched in both method for one PDCL.
+
 ```{r heatmap-pathways-5-percent, fig.width=12, fig.height=6}
 heatmap_pathways_0.05 <- heatmap.pathways(all_result_by_method_0.05)
 heatmap_pathways_0.05 
@@ -338,6 +355,8 @@ ggsave(
   height = 6
 )
 ```
+
+### Heatmap of the number of enriched pathways per categories
 
 ```{r heatmap-categories-5-percent, fig.width=16, fig.height=10}
 heatmap_categories_0.05 <- heatmap.categories(count_0.05)
@@ -367,6 +386,10 @@ count_0.1 <- result_by_method_0.1 %>%
   dplyr::count(method, pdcl, category, .drop = F)
 ```
 
+### Plot GProfiler VS GSEA
+
+Here we plot the -log10 of the fdr of both method for each PDCL.
+
 ```{r gprofiler-vs-gsea-10-percent}
 gprofiler_vs_gsea_0.1 <- plot.gprofiler.vs.gsea(all_result_0.1)
 gprofiler_vs_gsea_0.1 
@@ -377,6 +400,8 @@ ggsave(
   height = 7
 )
 ```
+
+### Plot Number of enriched pathways per categories
 
 ```{r count-categories-10-percent}
 count_categories_0.1 <- plot.count.categories(result_by_method_0.1)
@@ -389,6 +414,8 @@ ggsave(
 )
 ```
 
+### Plot Number of enriched pathways per PDCL
+
 ```{r countt-pathways-10-percent}
 count_pathways_0.1 <- plot.count.pathways(result_by_method_0.1)
 count_pathways_0.1 
@@ -400,6 +427,12 @@ ggsave(
 )
 ```
 
+### Heatmap of FDR values
+
+Here we plot a heatmap of the fdr values of a pathways for each PDCL for both method.
+
+Black rectangles indicates pathways that are enriched in both method for one PDCL.
+
 ```{r heatmap-pathways, fig.width=16, fig.height=14}
 heatmap_pathways_0.1 <- heatmap.pathways(all_result_by_method_0.1)
 heatmap_pathways_0.1 
@@ -410,6 +443,8 @@ ggsave(
   height = 14
 )
 ```
+
+### Heatmap of the number of enriched pathways per categories
 
 ```{r heatmap-categories-10-percent, fig.width=16, fig.height=10}
 heatmap_categories_0.1 <- heatmap.categories(count_0.1)
