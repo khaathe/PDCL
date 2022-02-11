@@ -2,15 +2,15 @@
 title: "PDCL Process"
 author: "Kévin SPINICCI"
 output:
+  pdf_document: 
+    fig_width: 10
+    fig_height: 7
+    highlight: kate
   html_notebook: 
     fig_width: 10
     fig_height: 7
     highlight: kate
     toc: yes
-  pdf_document: 
-    fig_width: 10
-    fig_height: 7
-    highlight: kate
 ---
 
 ```{r setup-library, include=FALSE}
@@ -306,7 +306,7 @@ Here we plot the -log10 of the fdr of both method for each PDCL.
 gprofiler_vs_gsea_0.05 <- plot.gprofiler.vs.gsea(all_result_0.05)
 gprofiler_vs_gsea_0.05 
 ggsave(
-  "Result/result_0.05/plot_gprofiler_vs_gsea.png",
+  "Result/plot/alpha_0.05/plot_gprofiler_vs_gsea.png",
   plot = gprofiler_vs_gsea_0.05,
   width = 10,
   height = 7
@@ -319,7 +319,7 @@ ggsave(
 count_categories_0.05 <- plot.count.categories(result_by_method_0.05)
 count_categories_0.05 
 ggsave(
-  "Result/result_0.05/plot_count_categories.png",
+  "Result/plot/alpha_0.05/plot_count_categories.png",
   plot = count_categories_0.05,
   width = 10,
   height = 7
@@ -332,7 +332,7 @@ ggsave(
 count_pathways_0.05 <- plot.count.pathways(result_by_method_0.05)
 count_pathways_0.05 
 ggsave(
-  "Result/result_0.05/plot_count_pathways.png",
+  "Result/plot/alpha_0.05/plot_count_pathways.png",
   plot = count_pathways_0.05,
   width = 10,
   height = 7
@@ -349,7 +349,7 @@ Black rectangles indicates pathways that are enriched in both method for one PDC
 heatmap_pathways_0.05 <- heatmap.pathways(all_result_by_method_0.05)
 heatmap_pathways_0.05 
 ggsave(
-  "Result/result_0.05/heatmap_pathways.png",
+  "Result/plot/alpha_0.05/heatmap_pathways.png",
   plot = heatmap_pathways_0.05,
   width = 12,
   height = 6
@@ -362,7 +362,7 @@ ggsave(
 heatmap_categories_0.05 <- heatmap.categories(count_0.05)
 heatmap_categories_0.05 
 ggsave(
-  "Result/result_0.05/heatmap_categories.png",
+  "Result/plot/alpha_0.05/heatmap_categories.png",
   plot = heatmap_categories_0.05,
   width = 16,
   height = 10
@@ -394,7 +394,7 @@ Here we plot the -log10 of the fdr of both method for each PDCL.
 gprofiler_vs_gsea_0.1 <- plot.gprofiler.vs.gsea(all_result_0.1)
 gprofiler_vs_gsea_0.1 
 ggsave(
-  "Result/result_0.1/plot_gprofiler_vs_gsea.png",
+  "Result/plot/alpha_0.1/plot_gprofiler_vs_gsea.png",
   plot = gprofiler_vs_gsea_0.1,
   width = 10,
   height = 7
@@ -407,7 +407,7 @@ ggsave(
 count_categories_0.1 <- plot.count.categories(result_by_method_0.1)
 count_categories_0.1 
 ggsave(
-  "Result/result_0.1/plot_count_categories.png",
+  "Result/plot/alpha_0.1/plot_count_categories.png",
   plot = count_categories_0.1,
   width = 10,
   height = 7
@@ -420,7 +420,7 @@ ggsave(
 count_pathways_0.1 <- plot.count.pathways(result_by_method_0.1)
 count_pathways_0.1 
 ggsave(
-  "Result/result_0.1/plot_count_pathways.png",
+  "Result/plot/alpha_0.1/plot_count_pathways.png",
   plot = count_pathways_0.1,
   width = 10,
   height = 7
@@ -437,7 +437,7 @@ Black rectangles indicates pathways that are enriched in both method for one PDC
 heatmap_pathways_0.1 <- heatmap.pathways(all_result_by_method_0.1)
 heatmap_pathways_0.1 
 ggsave(
-  "Result/result_0.1/heatmap_pathways.png",
+  "Result/plot/alpha_0.1/heatmap_pathways.png",
   plot = heatmap_pathways_0.1,
   width = 16,
   height = 14
@@ -450,7 +450,7 @@ ggsave(
 heatmap_categories_0.1 <- heatmap.categories(count_0.1)
 heatmap_categories_0.1 
 ggsave(
-  "Result/result_0.1/heatmap_categories.png",
+  "Result/plot/alpha_0.1/heatmap_categories.png",
   plot = heatmap_categories_0.1,
   width = 16,
   height = 10
