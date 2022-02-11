@@ -12,7 +12,7 @@ output:
     toc: yes
 ---
 
-```{r, message=FALSE}
+```{r setup-library, include=FALSE}
 # clean workspace
 rm(list=ls()) 
 
@@ -120,7 +120,7 @@ count_metadata$condition <- as.factor(count_metadata$condition)
 
 Perform a differential analysis for each PDCL in the database against the controls.
 
-```{r run-deseq2, cache=TRUE, message=FALSE}
+```{r run-deseq2, cache=TRUE, include=FALSE}
 deseq2_res_list <- lapply(pdcl_names, function(pdcl){
   dataset_pdcl <- c(control_names, pdcl)
   # Subract a dataset which contains only the counts for the
@@ -143,7 +143,7 @@ names(deseq2_res_list) <- pdcl_names
 Save Result in rds file and write a csv file for each PDCL.
 
 ```{r save-deseq2}
-saveRDS(deseq2_res_list, file = "deseq2_pdcl_vs_control.rds")
+saveRDS(deseq2_res_list, file = "Result/deseq2_pdcl_vs_control.rds")
 for (pdcl in pdcl_names){
   res <- deseq2_res_list[[pdcl]]
   res.file <- paste0("Result/deseq2/deseq2_", pdcl, ".csv")
@@ -156,7 +156,9 @@ for (pdcl in pdcl_names){
 Load GMT files for GSEA pathway enrichment.
 
 ```{r create-gsea-gmt-list}
-reactome_gmt_file <- gmtPathways("Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt")
+reactome_gmt_file <- gmtPathways(
+  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
+)
 gsea_gmt_list <- list(reactome = reactome_gmt_file)
 ```
 
@@ -166,7 +168,7 @@ Run GSEA for DESeq2 result
 
 We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
 
-```{r run-gsea, cache=TRUE, message=FALSE}
+```{r run-gsea, cache=TRUE, include=FALSE}
 set.seed(1)
 # Create the ranked list for GSEA
 rank_list <- lapply(deseq2_res_list, function(x){
@@ -176,7 +178,7 @@ rank_list <- lapply(deseq2_res_list, function(x){
 })
 # Run GSEA analysis for each ranked list for both Reactom and Bioplanet
 gsea_res_list <- lapply(rank_list, run.gsea, gsea_gmt_list)
-saveRDS(gsea_res_list, file = "gsea_pathway_enrichment.rds")
+saveRDS(gsea_res_list, file = "Result/gsea_pathway_enrichment.rds")
 gsea_gem <- lapply(gsea_res_list, convert.gsea.to.gem)
 save.gem.list.to.txt(gsea_gem, "Result/gsea/deseq2/", "deseq2")
 ```
@@ -217,7 +219,7 @@ names(penda_res) <- penda_pdcl_names
 
 Run G:Profiler for PENDA result
 
-```{r run-gprofiler, cache=TRUE, message=FALSE}
+```{r run-gprofiler, cache=TRUE, include=FALSE}
 all_pdcl_genes <- row.names(penda_res)
 gost_res_list <- lapply(penda_res, function(pdcl){
   gene_list <- all_pdcl_genes[pdcl != 0]
@@ -233,7 +235,7 @@ gost_res_list <- lapply(penda_res, function(pdcl){
 Save Result in RDS and in Generic Enrichment Map (GEM) format
 
 ```{r save-gprofiler}
-saveRDS(gost_res_list, file = "gprofiler_pathway_enrichment.rds")
+saveRDS(gost_res_list, file = "Result/gprofiler_pathway_enrichment.rds")
 gost_gem <- lapply(gost_res_list, convert.gost.to.gem)
 save.gem.list.to.txt(gost_gem, "Result/gprofiler/penda/", "penda")
 ```
@@ -283,10 +285,14 @@ threshold <- 0.05
 
 # Find the pathway enriched in both GSEA and G:Profiler for each PDCL
 common_pathway_0.05 <- find.common.pathways(collapsed_by_pathways, threshold)
-all_result_0.05 <- collapsed_by_pathways %>% inner_join(common_pathway_0.05, by=c("pathway_id", "pdcl"))
-all_result_by_method_0.05 <- collapsed_by_method %>% inner_join(common_pathway_0.05, by=c("pathway_id", "pdcl"))
-result_by_method_0.05 <- all_result_by_method_0.05 %>% filter(fdr < threshold)
-count_0.05 <- result_by_method_0.05 %>% dplyr::count(method, pdcl, category, .drop = F)
+all_result_0.05 <- collapsed_by_pathways %>% 
+  inner_join(common_pathway_0.05, by=c("pathway_id", "pdcl"))
+all_result_by_method_0.05 <- collapsed_by_method %>% 
+  inner_join(common_pathway_0.05, by=c("pathway_id", "pdcl"))
+result_by_method_0.05 <- all_result_by_method_0.05 %>% 
+  filter(fdr < threshold)
+count_0.05 <- result_by_method_0.05 %>% 
+  dplyr::count(method, pdcl, category, .drop = F)
 ```
 
 ```{r gprofiler-vs-gsea-5-percent}
@@ -351,10 +357,14 @@ threshold <- 0.1
 
 # Find the pathway enriched in both GSEA and G:Profiler for each PDCL
 common_pathway_0.1 <- find.common.pathways(collapsed_by_pathways, threshold)
-all_result_0.1 <- collapsed_by_pathways %>% inner_join(common_pathway_0.1, by=c("pathway_id", "pdcl"))
-all_result_by_method_0.1 <- collapsed_by_method %>% inner_join(common_pathway_0.1, by=c("pathway_id", "pdcl"))
-result_by_method_0.1 <- all_result_by_method_0.1 %>% filter(fdr < threshold)
-count_0.1 <- result_by_method_0.1 %>% dplyr::count(method, pdcl, category, .drop = F)
+all_result_0.1 <- collapsed_by_pathways %>%
+  inner_join(common_pathway_0.1, by=c("pathway_id", "pdcl"))
+all_result_by_method_0.1 <- collapsed_by_method %>%
+  inner_join(common_pathway_0.1, by=c("pathway_id", "pdcl"))
+result_by_method_0.1 <- all_result_by_method_0.1 %>%
+  filter(fdr < threshold)
+count_0.1 <- result_by_method_0.1 %>%
+  dplyr::count(method, pdcl, category, .drop = F)
 ```
 
 ```{r gprofiler-vs-gsea-10-percent}
