@@ -1,0 +1,517 @@
+---
+title: "PDCL Process"
+date: "`r Sys.Date()`"
+author: "Kévin SPINICCI"
+output:
+  html_notebook:
+    fig_width: 12
+    fig_height: 7
+    highlight: kate
+    toc: yes
+    toc_float: yes
+    number_sections: true
+  html_document:
+    toc: yes
+    toc_float: true
+    df_print: paged
+    fig_width: 12
+    fig_height: 7
+    highlight: kate
+    number_sections: true
+---
+
+```{r setup-library, include=FALSE}
+# clean workspace
+rm(list=ls()) 
+
+# Load required libraries (others are load directly in sourced files)
+library(DESeq2)
+library(dplyr)
+library(purrr)
+
+# Source files with functions used in next steps
+source("R/gprofiler-analysis.R")
+source("R/gsea-analysis.R")
+source("R/plot-result.R")
+```
+
+# Load Data
+
+## Load controls
+
+```{r load-controls}
+control_file <- "Data/PDCL/astrocyte_GSE109001_counts_unique_genes_samples_filtered.txt"
+control <- read.table(
+  control_file, 
+  header = T, 
+  sep = "\t", 
+  as.is = c("id", "symbol")
+)
+control_names <- c(
+  "AF22_NES_Astro_Br1_d29_37_S46",
+  "AF22_NES_Astro_Br2_d29_38_S56",
+  "AF22_NES_Astro_Br3_d29_39_S66",
+  "CCF.STTG1_p24_Br1_S16",
+  "CCF.STTG1_p24_Br2_S17",
+  "CCF.STTG1_p24_Br3_S18",
+  "CDIAstrocytes_p2_Br1_S19",
+  "CDIAstrocytes_p2_Br2_S20",
+  "CDIAstrocytes_p2_Br3_S21",
+  "phaAstrocyte_p2_Br1_S1",
+  "phaAstrocyte_p2_Br2_S2",
+  "phaAstrocyte_p2_Br3_S3"
+  )
+```
+
+## Load PDCL DataBase
+
+Load the PDCL count table. Disabled check.names otherwise it will add a X at the beginning of each column name, as column names aren't valid according to R.
+
+```{r load-pdcl}
+pdcl_count_table <- read.table(
+  "/home/spinicck/PhD/Data/PDCL/lignees_count_genes_PDCL.txt", 
+  sep = "\t", 
+  header = T, 
+  as.is = "gene_id", 
+  check.names = F
+)
+
+pdcl_names <- c(
+  "4339-p21",
+  "4371-p37",
+  "5706-p14",
+  "6190-p43",
+  "6240-p12",
+  "7015-p17",
+  "7060-p18", 
+  "7142-p14",
+  "N13-1300",
+  "N13-1520-p9",
+  "N14-0072",
+  "N14-0870",
+  "N14-1208",
+  "N14-1525",
+  "N15_0460",
+  "N15_0516",
+  "N15-0385",
+  "N15-0661",
+  "N16_0535",
+  "N16-0240"
+)
+```
+
+
+## Load PENDA results
+
+```{r load-penda}
+penda_res_file <- "Data/PDCL/results_combine.csv"
+penda_res <- read.table(penda_res_file, sep = ";", header = T, row.names = 1, check.names = F)
+penda_pdcl_names <- names(penda_res)
+# Remove ".genes.results" string in the column names
+penda_pdcl_names <- sub(".genes.results", "", penda_pdcl_names, ignore.case = T)
+names(penda_res) <- penda_pdcl_names
+```
+
+# Differential Analysis with DESeq2
+
+## Prepare Object needed by DESeq2 for Analysis
+
+Create two data.frame:
+
+-   count_data : contain the raw counts of each genes for both control and PDCL samples
+-   count_metadata : metadata for associated with the samples to know which samples belong to the controls and which belong to the PDCL
+
+```{r prepare-count-data}
+# Merge control and PDCL counts into one dataframe
+count_data <- merge(control, pdcl_count_table, by.x = "symbol", by.y = "gene_id")
+# Associate each row with a gene symbol
+row.names(count_data) <- count_data$symbol
+# Remove symbol and id columns
+count_data <- count_data %>% dplyr::select(!c(symbol, id))
+condition_vect <- c(
+  rep("control", length(control_names)), 
+  rep("pdcl", length(pdcl_names))
+)
+count_metadata <- data.frame(
+  sample = c(control_names, pdcl_names), 
+  condition=condition_vect
+)
+count_metadata$condition <- as.factor(count_metadata$condition)
+```
+
+## Perform Differential Analysis
+
+Perform a differential analysis for each PDCL in the database against the controls.
+
+```{r run-deseq2, cache=TRUE, include=FALSE}
+deseq2_res_list <- lapply(pdcl_names, function(pdcl){
+  dataset_pdcl <- c(control_names, pdcl)
+  # Subract a dataset which contains only the counts for the
+  # current PDCL
+  dataset <- count_data[,dataset_pdcl]
+  # Same with metadata
+  dataset_metadata <- count_metadata[ count_metadata$sample %in% dataset_pdcl, ]
+  # Perform DESeq2 Analysis
+  dds <- DESeqDataSetFromMatrix(
+    countData = dataset, 
+    colData = dataset_metadata, 
+    design = ~condition
+  )
+  dds <- DESeq(dds)
+  res <- results(dds, alpha = 0.05)
+})
+names(deseq2_res_list) <- pdcl_names
+```
+
+Save Result in rds file and write a csv file for each PDCL.
+
+```{r save-deseq2}
+saveRDS(deseq2_res_list, file = "Result/deseq2_pdcl_vs_control.rds")
+for (pdcl in pdcl_names){
+  res <- deseq2_res_list[[pdcl]]
+  res.file <- paste0("Result/deseq2/deseq2_", pdcl, ".csv")
+  write.csv(as.data.frame(res), file = res.file)
+}
+```
+
+# GSEA Pathway Enrichment
+
+## Load Gene Matrix Files (=GMT)
+
+Load GMT files for GSEA pathway enrichment.
+
+```{r create-gsea-gmt-list}
+reactome_gmt_file <- gmtPathways(
+  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
+)
+gsea_gmt_list <- list(reactome = reactome_gmt_file)
+```
+
+## Run GSEA
+
+Here we run a GSEA pathway enrichment analysis with the log2FoldChange calculated by DESeq2 as the scoring metrics in the ranked list submited to GSEA.
+
+*Message from Jorge :*
+
+We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
+
+```{r run-gsea, cache=TRUE, include=FALSE}
+set.seed(1)
+# Create the ranked list for GSEA
+rank_list <- lapply(deseq2_res_list, function(x){
+  rnk <- x$log2FoldChange
+  names(rnk) <- row.names(x)
+  rnk
+})
+
+penda_genes <- row.names(penda_res)
+rank_list_procesed <- lapply(pdcl_names, function(pdcl){
+  rnk <- deseq2_res_list[[pdcl]]$log2FoldChange
+  names(rnk) <- row.names(deseq2_res_list[[pdcl]])
+  not_deregulated_genes <- penda_genes[penda_res[,pdcl] == 0]
+  # Some genes in the PDCL database are not present in the control counts
+  # Thus they are not included in the deseq2 results.
+  not_deregulated_genes <- not_deregulated_genes[not_deregulated_genes %in% names(rnk)]
+  rnk[not_deregulated_genes] <- 0
+  rnk
+})
+names(rank_list_procesed) <- pdcl_names
+
+# Run GSEA analysis for each ranked list for both Reactom and Bioplanet
+gsea_res_list <- lapply(rank_list, run.gsea, gsea_gmt_list)
+saveRDS(gsea_res_list, file = "Result/gsea_pathway_enrichment.rds")
+
+gsea_gem <- lapply(gsea_res_list, convert.gsea.to.gem)
+save.gem.list.to.txt(gsea_gem, "Result/gsea/deseq2/", "deseq2")
+
+gsea_processed_res_list <- lapply(rank_list_procesed, run.gsea, gsea_gmt_list)
+saveRDS(gsea_processed_res_list, file = "Result/gsea_processed_pathway_enrichment.rds")
+
+gsea_processed_gem <- lapply(gsea_processed_res_list, convert.gsea.to.gem)
+save.gem.list.to.txt(gsea_processed_gem, "Result/gsea_processed/deseq2/", "deseq2")
+```
+
+## Run GSEA with processing using PENDA
+
+Here we run a GSEA pathway enrichment analysis with the log2FoldChange calculated by DESeq2 as the scoring metrics in the ranked list submited to GSEA.
+We use the results from the PENDA differential expression analysis to set to 0 the rank for genes that are not found differentially expressed by PENDA. 
+We cannot trust the DESeq2 p-value as the condition for the test were not satisfied (multiple replicates for each PDCL).
+
+*Message from Jorge :*
+
+We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
+
+```{r run-gsea-processed, cache=TRUE, include=FALSE}
+set.seed(1)
+
+penda_genes <- row.names(penda_res)
+rank_list_procesed <- lapply(pdcl_names, function(pdcl){
+  rnk <- deseq2_res_list[[pdcl]]$log2FoldChange
+  names(rnk) <- row.names(deseq2_res_list[[pdcl]])
+  not_deregulated_genes <- penda_genes[penda_res[,pdcl] == 0]
+  # Some genes in the PDCL database are not present in the control counts
+  # Thus they are not included in the deseq2 results.
+  not_deregulated_genes <- not_deregulated_genes[not_deregulated_genes %in% names(rnk)]
+  rnk[not_deregulated_genes] <- 0
+  rnk
+})
+names(rank_list_procesed) <- pdcl_names
+
+gsea_processed_res_list <- lapply(rank_list_procesed, run.gsea, gsea_gmt_list)
+saveRDS(gsea_processed_res_list, file = "Result/gsea_processed_pathway_enrichment.rds")
+
+gsea_processed_gem <- lapply(gsea_processed_res_list, convert.gsea.to.gem)
+save.gem.list.to.txt(gsea_processed_gem, "Result/gsea_processed/deseq2/", "deseq2")
+```
+
+# GProfiler Analysis for PENDA resuls
+
+Upload GMT File before running G:Profiler Enrichment Analysis if needed.
+
+Otherwise juste define the token of the GMT stored on G:Profiler website.
+
+```{r upload-gmt-gprofiler}
+# This portion is commented because the file are already uploaded
+# reactome_gmt_token <- upload_GMT_file(gmtfile = 
+#  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
+# )
+# bioplanet_gmt_token <- upload_GMT_file(gmtfile = 
+#  "Data/gene-set/jorge-gmt/bioplanet_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
+# )
+
+reactome_gmt_token <- "gp__Nqmx_yxm7_37U"
+bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
+```
+
+Create a list of GMT files.
+
+```{r create-gprofiler-gmt-list}
+gprofiler_gmt_list <- list(reactome = reactome_gmt_token)
+```
+
+Run G:Profiler for PENDA result
+
+```{r run-gprofiler, cache=TRUE, include=FALSE}
+all_pdcl_genes <- row.names(penda_res)
+gost_res_list <- lapply(penda_res, function(pdcl){
+  gene_list <- all_pdcl_genes[pdcl != 0]
+  res <- run.gost(
+    gene_list,
+    all_pdcl_genes,
+    gprofiler_gmt_list
+  )
+  return(res)
+})
+```
+
+Save Result in RDS and in Generic Enrichment Map (GEM) format
+
+```{r save-gprofiler}
+saveRDS(gost_res_list, file = "Result/gprofiler_pathway_enrichment.rds")
+gost_gem <- lapply(gost_res_list, convert.gost.to.gem)
+save.gem.list.to.txt(gost_gem, "Result/gprofiler/penda/", "penda")
+```
+
+# Plot Results
+
+## Define GEM list
+
+```{r define-gem-list}
+gem_list <- list("G:Profiler" = gost_gem, "GSEA" = gsea_gem, "GSEA Processed" = gsea_processed_gem)
+```
+
+## Collapse by method
+
+```{r collapse-by-method}
+# Collapse the results by method.
+# One line contain the result of one enrichment method for one pathway of one PDCL
+gem_collapsed <- collapse.gem.list(gem_list)
+```
+
+## Collapse by pathways
+
+```{r collapse-by-pathways}
+gem_collapsed_method_vs_method <- collapse.method.vs.method(gem_collapsed)
+```
+
+## Find common pathways
+
+```{r find-common-pathways}
+all_common_pathways <- find.method.common.pathways(gem_collapsed_method_vs_method, c(0.05, 0.1))
+gem_collapsed_method_vs_method <- gem_collapsed_method_vs_method %>%
+  inner_join(all_common_pathways, by=c("pathway_id", "pdcl", "method_1", "method_2"))
+```
+
+## Alpha = 0.05
+
+```{r set-alpha-5-percent}
+threshold <- 0.05
+```
+
+### Plot Method vs Method
+
+```{r gprofiler-vs-gsea-5-percent}
+gprofiler_vs_gsea <- plot_method_vs_method(gem_collapsed_method_vs_method, "G:Profiler", "GSEA", threshold)
+gprofiler_vs_gsea
+ggsave(
+  "Result/plot/alpha_0.05/plot_gprofiler_vs_gsea.png",
+  plot = gprofiler_vs_gsea,
+  width = 10,
+  height = 7
+)
+```
+
+
+```{r gprofiler-vs-gsea-processed-5-percent}
+gprofiler_vs_gsea_processed <- plot_method_vs_method(gem_collapsed_method_vs_method, "G:Profiler", "GSEA Processed", threshold)
+gprofiler_vs_gsea_processed
+ggsave(
+  "Result/plot/alpha_0.05/plot_gprofiler_vs_gsea_processed.png",
+  plot = gprofiler_vs_gsea_processed,
+  width = 10,
+  height = 7
+)
+```
+
+```{r gsea-vs-gsea-processed-5-percent}
+gsea_vs_gsea_processed <- plot_method_vs_method(gem_collapsed_method_vs_method, "GSEA", "GSEA Processed", threshold)
+gsea_vs_gsea_processed
+ggsave(
+  "Result/plot/alpha_0.05/plt_gsea_vs_gsea_processed.png",
+  plot = gsea_vs_gsea_processed,
+  width = 10,
+  height = 7
+)
+```
+
+```{r count-categories-5-percent}
+count_categories_0.05 <- plot.count.categories(gem_collapsed, threshold)
+count_categories_0.05
+ggsave(
+  "Result/plot/alpha_0.05/plot_count_categories_0.05.png",
+  plot = count_categories_0.05,
+  width = 10,
+  height = 7
+)
+```
+
+```{r count-categories-gprofiler-vs-gsea-5-percent}
+
+count_categories_gprofiler_vs_gsea_0.05 <- plot.count.categories.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA")
+count_categories_gprofiler_vs_gsea_0.05
+ggsave(
+  "Result/plot/alpha_0.05/plot_count_categories_gprofiler_vs_gsea_0.05.png",
+  plot = count_categories_gprofiler_vs_gsea_0.05,
+  width = 10,
+  height = 7
+)
+```
+```{r count-categories-gprofiler-vs-gsea_processed-5-percent}
+
+count_categories_gprofiler_vs_gsea_processed_0.05 <- plot.count.categories.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed")
+count_categories_gprofiler_vs_gsea_processed_0.05
+ggsave(
+  "Result/plot/alpha_0.05/plot_count_categories_gprofiler_vs_gsea_processed_0.05.png",
+  plot = count_categories_gprofiler_vs_gsea_processed_0.05,
+  width = 10,
+  height = 7
+)
+```
+
+```{r count-categories-gsea-vs-gsea_processed-5-percent}
+
+count_categories_gsea_vs_gsea_processed_0.05 <- plot.count.categories.m.vs.m(gem_collapsed, all_common_pathways, threshold, "GSEA", "GSEA Processed")
+count_categories_gsea_vs_gsea_processed_0.05
+ggsave(
+  "Result/plot/alpha_0.05/plot_count_categories_gsea_vs_gsea_processed_0.05.png",
+  plot = count_categories_gsea_vs_gsea_processed_0.05,
+  width = 10,
+  height = 7
+)
+```
+
+```{r count-pathways-5-percent}
+count_pathways_0.05 <- plot.count.pathways(gem_collapsed, threshold)
+count_pathways_0.05 
+ggsave(
+  "Result/plot/alpha_0.05/plot_count_pathways.png",
+  plot = count_pathways_0.05,
+  width = 10,
+  height = 7
+)
+```
+
+```{r count-pathways-gprofiler-vs-gsea-5-percent}
+count_pathways_gprofiler_vs_gsea_0.05 <- plot.count.pathways.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA")
+count_pathways_gprofiler_vs_gsea_0.05 
+ggsave(
+  "Result/plot/alpha_0.05/plot_count_pathways_gprofiler_vs_gsea.png",
+  plot = count_pathways_gprofiler_vs_gsea_0.05,
+  width = 10,
+  height = 7
+)
+```
+```{r count-pathways-gprofiler-vs-gsea_processed-5-percent}
+count_pathways_gprofiler_vs_gsea_processed_0.05 <- plot.count.pathways.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed")
+count_pathways_gprofiler_vs_gsea_processed_0.05 
+ggsave(
+  "Result/plot/alpha_0.05/plot_count_pathways_gprofiler_vs_gsea_processed.png",
+  plot = count_pathways_gprofiler_vs_gsea_processed_0.05,
+  width = 10,
+  height = 7
+)
+```
+
+```{r count-pathways-gsea-vs-gsea_processed-5-percent}
+count_pathways_gsea_vs_gsea_processed_0.05 <- plot.count.pathways.m.vs.m(gem_collapsed, all_common_pathways, threshold, "GSEA", "GSEA Processed")
+count_pathways_gsea_vs_gsea_processed_0.05 
+ggsave(
+  "Result/plot/alpha_0.05/plot_count_pathways_gsea_vs_gsea_processed.png",
+  plot = count_pathways_gsea_vs_gsea_processed_0.05,
+  width = 10,
+  height = 7
+)
+```
+```{r heatmap-pathways-gprofiler-vs-gsea-5-percent, fig.width=12, fig.height=6}
+heatmap_pathways_gprofiler_vs_gsea_0.05 <- heatmap.pathways(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA")
+heatmap_pathways_gprofiler_vs_gsea_0.05
+ggsave(
+  "Result/plot/alpha_0.05/heatmap_pathways_gprofiler_vs_gsea.png",
+  plot = heatmap_pathways_gprofiler_vs_gsea_0.05,
+  width = 16,
+  height = 10
+)
+```
+
+```{r heatmap-pathways-gprofiler-vs-gsea_processed-5-percent, fig.width=12, fig.height=6}
+heatmap_pathways_gprofiler_vs_gsea_processed_0.05 <- heatmap.pathways(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed")
+heatmap_pathways_gprofiler_vs_gsea_processed_0.05
+ggsave(
+  "Result/plot/alpha_0.05/heatmap_pathways_gprofiler_vs_gsea_processed.png",
+  plot = heatmap_pathways_gprofiler_vs_gsea_processed_0.05,
+  width = 16,
+  height = 10
+)
+```
+
+```{r heatmap-pathways-gsea-vs-gsea_processed-5-percent, fig.width=12, fig.height=6}
+heatmap_pathways_gsea_vs_gsea_processed_0.05 <- heatmap.pathways(gem_collapsed, all_common_pathways, threshold, "GSEA", "GSEA Processed")
+heatmap_pathways_gsea_vs_gsea_processed_0.05
+ggsave(
+  "Result/plot/alpha_0.05/heatmap_pathways_gsea_vs_gsea_processed.png",
+  plot = heatmap_pathways_gsea_vs_gsea_processed_0.05,
+  width = 16,
+  height = 10
+)
+```
+
+```{r heatmap-categories-5-percent, fig.width=16, fig.height=10}
+heatmap_categories_0.05 <- heatmap.categories(gem_collapsed, threshold)
+heatmap_categories_0.05 
+ggsave(
+  "Result/plot/alpha_0.05/heatmap_categories.png",
+  plot = heatmap_categories_0.05,
+  width = 16,
+  height = 10
+)
+```

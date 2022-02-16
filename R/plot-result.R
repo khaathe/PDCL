@@ -87,6 +87,26 @@ word_list <- list(
                             "^(?=.*insulin)(?=.*(recept|stimulus|process)).*$","insulin-like","\\bp38","oncostatin")
 )
 
+map.list.to.df <- function(x, var_name){
+  map2_dfr(x, names(x), function(el, el_name){
+    el[,var_name] = el_name
+    el
+  })
+}
+
+method_vs_method <- function(collapsed_by_method, m1_name, m2_name){
+  m1_df <- collapsed_by_method %>%
+    filter(method == m1_name)
+  m2_df <- collapsed_by_method %>%
+    filter(method == m2_name)
+  m_vs_m <- m1_df %>% 
+    full_join(m2_df, by = c("pathway_id", "pdcl", "db", "category")) %>% 
+    dplyr::rename(p_value_m1 = p_value.x, p_value_m2 = p_value.y, fdr_m1 = fdr.x, fdr_m2 = fdr.y) %>%
+    select(pathway_id, pdcl, db, p_value_m1, fdr_m1, p_value_m2, fdr_m2, category) %>%
+    mutate(method_1 = m1_name, method_2 = m2_name)
+  m_vs_m
+}
+
 collapse.data.by.pathways <- function(gost.penda.gem, gsea.deseq2.gem, pdcl.samples.name, db.source){
   collapsed <- data.frame()
   for (pdcl in pdcl.samples.name){
@@ -118,6 +138,50 @@ collapse.data.by.method <- function(collapsed.by.pathways){
   rbind(gprofiler, gsea)
 }
 
+collapse.gem.list <- function(gem_list){
+  collapsed_by_method <- gem_list
+  collapsed_by_method <-  map_depth(.x = collapsed_by_method, .depth = 2, .f = function(x){
+    map.list.to.df(x, "db")
+  })
+  
+  collapsed_by_method <-  map_depth(.x = collapsed_by_method, .depth = 1, .f = function(x){
+    map.list.to.df(x, "pdcl")
+  })
+  
+  collapsed_by_method <-  map_depth(.x = collapsed_by_method, .depth = 0, .f = function(x){
+    map.list.to.df(x, "method")
+  })
+  
+  collapsed_by_method <- assign.categories(collapsed_by_method)
+  
+  collapsed_by_method <- collapsed_by_method %>%
+    filter(!(undesired | is.na(category)))
+  
+  collapsed_by_method$category <- factor(
+    collapsed_by_method$category,
+    levels = names(word_list)
+  )
+  
+  collapsed_by_method$pdcl <- factor(
+    collapsed_by_method$pdcl,
+    levels = pdcl_names
+  )
+  collapsed_by_method
+}
+
+collapse.method.vs.method <- function(collapsed_by_method){
+  method_names <- unique(collapsed_by_method$method)
+  collapsed_by_pathways <- data.frame()
+  for (m1 in head(method_names, n=-1)){
+    index <- which(method_names == m1)
+    for (m2 in tail(method_names, n = -index)){
+      m_vs_m <- method_vs_method(collapsed_by_method, m1, m2)
+      collapsed_by_pathways <- rbind(collapsed_by_pathways, m_vs_m)
+    }
+  }
+  collapsed_by_pathways
+}
+
 find.common.pathways <- function(collapsed.by.pathways, threshold){
   common <- collapsed.by.pathways 
   common <- common %>%
@@ -132,6 +196,23 @@ find.common.pathways <- function(collapsed.by.pathways, threshold){
   )
   
   common
+}
+
+find.method.common.pathways <- function(collapsed_method_vs_method, threshold_vect){
+  common <- collapsed_method_vs_method
+  for ( threshold in threshold_vect){
+    var_name <- paste0("alpha_", threshold)
+    is_common <- ( common$fdr_m1<threshold & common$fdr_m2<threshold )
+    is_common[is.na(is_common)] <- F
+    is_common <- factor(
+      is_common, 
+      levels = c("TRUE", "FALSE"), 
+      labels = c("Common Pathways", "Specific Pathways")
+    )
+    common[,var_name] <- is_common
+  }
+  col_to_keep <- c("pdcl", "pathway_id", "method_1", "method_2", paste0("alpha_", threshold_vect) )
+  common %>% select(all_of(col_to_keep))
 }
 
 assign.categories <- function(x){
@@ -177,9 +258,71 @@ plot.gprofiler.vs.gsea <- function(x){
     ) 
 }
 
-plot.count.pathways <- function(x){
+plot_method_vs_method <- function(x, m1, m2, threshold){
+  data <- x %>% filter(method_1 == m1, method_2 == m2)
+  alpha_col <- paste0("alpha_", threshold)
+  data$is.common <- data[,alpha_col]
   ggplot(
-    data = x, 
+    data = data, 
+    aes(
+      x = -log10(fdr_m1), 
+      y = -log10(fdr_m2),
+      colour = is.common
+    )
+  ) +
+    geom_point(
+      size = 0.5
+    ) +
+    scale_colour_manual(values = c("red", "grey30")) +
+    facet_wrap(vars(pdcl)) +
+    labs(
+      title = paste0( m1, " against ", m2),
+      subtitle = paste0("Threshold alpha : ", threshold),
+      x = paste0( "-log10(fdr ",  m2, ")"),
+      y = paste0( "-log10(fdr ",  m2, ")"),
+      colour = ""
+    ) +
+    theme(
+      plot.title = element_text(hjust = 0.5,face = "bold",color = "red"),
+      plot.subtitle = element_text(hjust = 0.5,face = "italic",color = "blue"),
+      axis.text.x = element_text(angle = 90)
+    ) 
+}
+
+plot.count.pathways <- function(collapsed.by.method, threshold){
+  data <- collapsed.by.method %>% filter(fdr<threshold)
+  ggplot(
+    data = data, 
+    aes(x = pdcl)
+  ) +
+    geom_bar(fill = "steelblue") +
+    labs(
+      title = "Number of enriched pathways per PDCL for each enrichment method",
+      subtitle = paste0("Threshold alpha : ", threshold),
+      x = "PDCL",
+      y = "Counts",
+      fill = ""
+    ) +
+    facet_wrap(vars(method)) +
+    theme(
+      plot.title = element_text(hjust = 0.5,face = "bold",color = "red"),
+      plot.subtitle = element_text(hjust = 0.5,face = "italic",color = "blue"),
+      axis.text.x = element_text(angle = 90)
+    )  +
+    #We need to specify this. If not, unpopulated categories do not appear
+    scale_x_discrete(drop = F)
+}
+
+plot.count.pathways.m.vs.m <- function(collapsed.by.method, common.pathways, threshold, m1, m2){
+  common.pathways <- common.pathways %>%
+    filter(method_1 == m1, method_2 == m2)
+  collapsed.by.method <- collapsed.by.method %>% 
+    filter( method %in% c(m1, m2) & fdr < threshold ) %>%
+    inner_join(common.pathways, by=c("pdcl", "pathway_id"))
+  collapsed.by.method$is.common <- collapsed.by.method[,paste0("alpha_", threshold)]
+  
+  ggplot(
+    data = collapsed.by.method, 
     aes(x = pdcl, fill = is.common )
   ) +
     geom_bar() +
@@ -201,9 +344,38 @@ plot.count.pathways <- function(x){
     scale_x_discrete(drop = F)
 }
 
-plot.count.categories <- function(x){
+plot.count.categories <- function(collapsed.by.method, threshold){
+  data <- collapsed.by.method %>% filter(fdr<threshold)
   ggplot(
-    x,
+    data,
+    aes(x = category)
+  ) +
+    geom_bar(fill = "steelblue") +
+    facet_wrap(~method) +
+    labs(
+      x = "Category name",
+      y = "Counts",
+      title = "Number of enriched pathways in a category for each enrichment method",
+      subtitle = paste0("Threshold alpha : ", threshold)
+    ) +
+    theme(
+      plot.title = element_text(hjust = 0.5,face = "bold",color = "red"),
+      plot.subtitle = element_text(hjust = 0.5,face = "italic",color = "blue"),
+      axis.text.x = element_text(angle = 90)
+    ) +
+    #We need to specify this. If not, unpopulated categories do not appear
+    scale_x_discrete(drop = F)
+}
+
+plot.count.categories.m.vs.m <- function(collapsed.by.method, common.pathways, threshold, m1, m2){
+  common.pathways <- common.pathways %>%
+    filter(method_1 == m1, method_2 == m2)
+  collapsed.by.method <- collapsed.by.method %>% 
+    filter( method %in% c(m1, m2) & fdr < threshold ) %>%
+    inner_join(common.pathways, by=c("pdcl", "pathway_id"))
+  collapsed.by.method$is.common <- collapsed.by.method[,paste0("alpha_", threshold)]
+  ggplot(
+    collapsed.by.method,
     aes(x = category, fill = is.common)
   ) +
     geom_bar() +
@@ -238,12 +410,21 @@ fdr.to.factor <- function(x, n){
   x
 }
 
-heatmap.pathways <- function(x){
-  common.pathways <- x %>% 
+heatmap.pathways <- function(collapsed.by.method, common.pathways, threshold, m1, m2){
+  common_col_name <- paste0("alpha_", threshold)
+  common.pathways <- common.pathways %>%
+    filter(method_1 == m1, method_2 == m2) %>%
+    rename(is.common = all_of(common_col_name), method = method_1) %>%
+    select(pdcl, pathway_id, method, is.common )
+  
+  collapsed.by.method <- collapsed.by.method %>% 
+    left_join(common.pathways, by=c("pdcl", "pathway_id", "method"))
+  
+  common.pathways <- common.pathways %>%  
     filter(is.common == "Common Pathways") %>%
-    select(pdcl, pathway_id, is.common)
+    select(!method)
   pathway.ids <- unique(common.pathways$pathway_id)
-  data <- x %>% filter(pathway_id %in% pathway.ids)
+  data <- collapsed.by.method %>% filter(pathway_id %in% pathway.ids)
   data <- fdr.to.factor(data, 5)
   ggplot(
     data = data, 
@@ -277,9 +458,12 @@ heatmap.pathways <- function(x){
     scale_y_discrete(limits=rev)
 }
 
-heatmap.categories <- function(x){
+heatmap.categories <- function(collapsed.by.method, threshold){
+  count <- collapsed.by.method %>% 
+    filter(fdr < threshold) %>%
+    dplyr::count(method, pdcl, category, .drop = F)
   ggplot(
-    data = x,
+    data = count,
     aes(x = pdcl, y = category, fill = n)
   ) + 
     geom_raster() +
