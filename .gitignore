@@ -1,8 +1,12 @@
 Data/
-Result/
-pdcl_files/
-pdcl_cache/
+Result*/
+*_files/
+*_cache/
+Code_Magali/
+V1/
 
 .Rhistory
 
+*.pdf
+*.html
 *.rds
