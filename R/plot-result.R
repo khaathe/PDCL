@@ -1,5 +1,6 @@
 ######## Load Library needed
 library(ggplot2)
+library(ggh4x)
 
 # Made by Jorge
 #Define undesired words
@@ -166,6 +167,12 @@ collapse.gem.list <- function(gem_list){
     collapsed_by_method$pdcl,
     levels = pdcl_names
   )
+  
+  collapsed_by_method$method <- factor(
+    collapsed_by_method$method,
+    levels = unique(collapsed_by_method$method)
+  )
+  
   collapsed_by_method
 }
 
@@ -426,7 +433,12 @@ heatmap.pathways <- function(collapsed.by.method, common.pathways, threshold, m1
   pathway.ids <- unique(common.pathways$pathway_id)
   data <- collapsed.by.method %>% filter(pathway_id %in% pathway.ids)
   data <- fdr.to.factor(data, 5)
-  ggplot(
+  
+  category_df <- data %>% distinct(category, pathway_id) %>% arrange(pathway_id)
+  
+  plot_title <- "FDR value each pathways by PDCL and method "
+  plot_subtitle <- paste0("Pathways are common between : ", m1, " and ", m2)
+  heatmap_plot <- ggplot(
     data = data, 
     aes(x = pdcl, y = pathway_id, fill =  fdr)
   ) +
@@ -440,7 +452,8 @@ heatmap.pathways <- function(collapsed.by.method, common.pathways, threshold, m1
       size = 0.5
     ) +
     labs(
-      title = "FDR value for pathways enriched in both G:Profiler and GSEA",
+      title = plot_title,
+      subtitle = plot_subtitle,
       x = "PDCL",
       y = "Pathway",
       fill = "FDR"
@@ -455,7 +468,13 @@ heatmap.pathways <- function(collapsed.by.method, common.pathways, threshold, m1
     #We need to specify this. If not, unpopulated categories do not appear
     scale_x_discrete(drop = F) +
     # By default it is sorted in desc order, we reverse it so it is in asc order
-    scale_y_discrete(limits=rev)
+    scale_y_discrete(limits=rev) + 
+    guides(
+      y.sec =  guide_axis_manual(
+        labels = rev(category_df$category),
+        title = "Category"
+      )
+    )
 }
 
 heatmap.categories <- function(collapsed.by.method, threshold){
