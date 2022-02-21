@@ -421,7 +421,7 @@ heatmap.pathways <- function(collapsed.by.method, common.pathways, threshold, m1
   common_col_name <- paste0("alpha_", threshold)
   common.pathways <- common.pathways %>%
     filter(method_1 == m1, method_2 == m2) %>%
-    rename(is.common = all_of(common_col_name), method = method_1) %>%
+    dplyr::rename(is.common = all_of(common_col_name), method = method_1) %>%
     select(pdcl, pathway_id, method, is.common )
   
   collapsed.by.method <- collapsed.by.method %>% 
