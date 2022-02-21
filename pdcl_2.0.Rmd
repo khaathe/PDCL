@@ -591,23 +591,23 @@ heatmap_categories_0.05
 #### G:Profiler vs GSEA Processed
 
 ```{r plot-common-pathway-genes-5-percent}
-plot_common_pathway_genes_0.05 <- plot.common.pathway.genes(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA", "method_2", 100)
+plot_common_pathway_genes_0.05 <- plot.common.pathway.genes(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed", "method_2", 100)
 ggsave(
   "Result/plot/alpha_0.05/common_pathway_genes.png",
   plot = plot_common_pathway_genes_0.05,
-  width = 16,
+  width = 20,
   height = 10
 )
 plot_common_pathway_genes_0.05
 ```
 
 ```{r heatmap-common-genes-rank-5-percent}
-heatmap_common_pathway_genes_0.05 <- heatmap.common.gene.ranks(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA", "method_2", 100)
+heatmap_common_pathway_genes_0.05 <- heatmap.common.gene.ranks(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed", "method_2", 100)
 ggsave(
   "Result/plot/alpha_0.05/heatmap_common_pathway_genes_0.05.png",
   plot = heatmap_common_pathway_genes_0.05,
-  width = 16,
-  height = 10
+  width = 14,
+  height = 20
 )
 heatmap_common_pathway_genes_0.05
 ```
@@ -826,23 +826,23 @@ heatmap_categories_0.1
 #### G:Profiler vs GSEA Processed
 
 ```{r plot-common-pathway-genes-10-percent}
-plot_common_pathway_genes_0.1 <- plot.common.pathway.genes(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA", "method_2", 100)
+plot_common_pathway_genes_0.1 <- plot.common.pathway.genes(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed", "method_2", 100)
 ggsave(
   "Result/plot/alpha_0.1/common_pathway_genes.png",
   plot = plot_common_pathway_genes_0.1,
-  width = 16,
+  width = 20,
   height = 10
 )
 plot_common_pathway_genes_0.1
 ```
 
 ```{r heatmap-common-genes-rank-10-percent}
-heatmap_common_pathway_genes_0.1 <- heatmap.common.gene.ranks(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA", "method_2", 100)
+heatmap_common_pathway_genes_0.1 <- heatmap.common.gene.ranks(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed", "method_2", 100)
 ggsave(
   "Result/plot/alpha_0.1/heatmap_common_pathway_genes_0.1.png",
   plot = heatmap_common_pathway_genes_0.1,
-  width = 16,
-  height = 10
+  width = 14,
+  height = 20
 )
 heatmap_common_pathway_genes_0.1
 ```
