@@ -498,3 +498,172 @@ heatmap.categories <- function(collapsed.by.method, threshold){
     # By default it is sorted in desc order, we reverse it so it is in asc order
     scale_y_discrete(limits=rev)
 }
+
+collapse.rnk <- function(rnk){
+  rnk <- imap_dfr(rnk, .f = function(rank,pdcl){
+    data.frame(gene = names(rank), rank = rank, pdcl = pdcl, row.names = NULL)
+  })
+  rnk$pdcl <- factor(rnk$pdcl)
+  rnk
+}
+
+summarize.rank <- function(rnk.collaspe){
+  rnk.collaspe %>% 
+    group_by(gene) %>% 
+    summarise(mean = mean(rank), sd = sd(rank), abs.mean = mean(abs(rank))) %>%
+    arrange(desc(abs.mean))
+}
+
+get.genes.in.pathway <- function(collapsed.by.method){
+  genes.in.common.pathways <- collapsed.by.method %>%
+    mutate(genes = strsplit(genes, ",")) %>%
+    unnest(genes) %>%
+    dplyr::rename(gene = genes)
+}
+
+get.genes.in.common.pathways <- function(collapsed.by.method, all.common.pathways, threshold, m1, m2, common.method.col){
+  alpha_col <- paste0("alpha_", threshold)
+  common_pathways <- all_common_pathways %>%
+    filter( .data[[alpha_col]] == "Common Pathways", method_1 == m1, method_2 == m2) %>%
+    dplyr::rename(method = all_of(common.method.col))
+  
+  genes.in.common.pathways <- get.genes.in.pathway(collapsed.by.method) %>%
+    inner_join(common_pathways, by = c("pdcl", "pathway_id", "method"))
+  genes.in.common.pathways
+}
+
+plot.common.pathway.genes <- function(rnk.collapsed, collapsed.by.method, all.common.pathways, threshold, m1, m2, gsea.col, nb.gene){
+  genes.in.common.pathways <- get.genes.in.common.pathways(collapsed.by.method, all.common.pathways, threshold, m1, m2, gsea.col) %>%
+    add_count(pathway_id, gene)
+  
+  rnk <- rnk.collapsed %>% filter(gene %in% unique(genes.in.common.pathways$gene)) 
+  rnk_summary <- summarize.rank(rnk)
+  rnk_summary <- rnk_summary %>% dplyr::slice(1:nb.gene)
+  
+  top.genes <- rnk_summary$gene
+  
+  rnk <- filter(rnk, gene %in% top.genes)
+  genes.in.common.pathways <- filter(genes.in.common.pathways, gene %in% top.genes)
+  
+  plot_title <- paste0("Top ", nb.gene, " genes in common pathways")
+  plot_subtitle <- paste0("Pathways are common between : ", m1, " and ", m2)
+  plot <- ggplot(genes.in.common.pathways, aes(gene, pathway_id, size = n) ) +
+    geom_point() +
+    labs(
+      title = plot_title,
+      subtitle = plot_subtitle,
+      x = "Gene Symbol",
+      y = "Pathways",
+      size = "Number of PDCL"
+    ) +
+    theme(axis.text.x = element_text(angle = 90) ) +
+    scale_y_discrete(limits = rev)
+  plot
+}
+
+heatmap.common.gene.ranks <- function(rnk.collapsed, collapsed.by.method, all.common.pathways, threshold, m1, m2, gsea.col, nb.gene){
+  genes.in.common.pathways <- get.genes.in.common.pathways(collapsed.by.method, all.common.pathways, threshold, m1, m2, gsea.col) %>%
+    add_count(pathway_id, gene)
+  
+  rnk <- rnk.collapsed %>% filter(gene %in% unique(genes.in.common.pathways$gene)) 
+  rnk_summary <- summarize.rank(rnk)
+  rnk_summary <- rnk_summary %>% dplyr::slice(1:nb.gene)
+  
+  top.genes <- rnk_summary$gene
+  
+  rnk <- filter(rnk, gene %in% top.genes)
+  genes.in.common.pathways <- filter(genes.in.common.pathways, gene %in% top.genes)
+  
+  plot_title <- paste0("Top ", nb.gene, " genes rank in common pathways")
+  plot_subtitle <- paste0("Pathways are common between : ", m1, " and ", m2)
+  heatmap <- ggplot(rnk, aes(pdcl, gene, fill = rank)) +
+    geom_tile() +
+    scale_fill_gradient2(
+      high = "red",
+      low = "blue",
+      na.value = "gray30"
+    ) +
+    geom_tile(
+      data = genes.in.common.pathways,
+      mapping = aes(x = pdcl, y = gene),
+      inherit.aes = F,
+      colour = 'black',
+      fill = NA,
+      size = 0.5
+    ) +
+    labs(
+      title = plot_title,
+      subtitle = plot_subtitle,
+      x = "PDCL",
+      y = "Gene Symbol",
+      fill = "Rank"
+    ) +
+    theme(axis.text.x = element_text(angle = 90) ) +
+    scale_y_discrete(limits = rev)
+  heatmap
+}
+
+
+plot.gsea.pathway.genes <- function(rnk.collapsed, collapsed.by.method, gsea.method.name, threshold, nb.gene){
+  genes_to_pathway <- get.genes.in.pathway(collapsed.by.method) %>%
+    filter(fdr<threshold, method == gsea.method.name) %>%
+    add_count(pathway_id, gene)
+  
+  rnk <- rnk.collapsed %>% filter(gene %in% unique(genes_to_pathway$gene)) 
+  rnk_summary <- summarize.rank(rnk)
+  rnk_summary <- rnk_summary %>% dplyr::slice(1:nb.gene)
+  
+  top.genes <- rnk_summary$gene
+  
+  rnk <- filter(rnk, gene %in% top.genes)
+  genes_to_pathway <- filter(genes_to_pathway, gene %in% top.genes)
+  
+  plot_title <- paste0("Top ", nb.gene, " genes in enriched pathways for ", gsea.method.name)
+  plot_subtitle <- paste0("Alpha : ", threshold)
+  plot <- ggplot(genes_to_pathway, aes(gene, pathway_id, size = n) ) +
+    geom_point() +
+    labs(
+      title = plot_title,
+      subtitle = plot_subtitle,
+      x = "Gene Symbol",
+      y = "Pathways",
+      size = "Number of PDCL"
+    ) +
+    theme(axis.text.x = element_text(angle = 90) ) +
+    scale_y_discrete(limits = rev)
+  plot
+}
+
+heatmap.gsea.gene.ranks <- function(rnk.collapsed, collapsed.by.method, gsea.method.name, threshold, nb.gene){
+  genes_to_pathway <- get.genes.in.pathway(collapsed.by.method) %>%
+    filter(fdr<threshold, method == gsea.method.name)
+  
+  rnk <- rnk.collapsed %>% filter(gene %in% unique(genes_to_pathway$gene)) 
+  rnk_summary <- summarize.rank(rnk)
+  rnk_summary <- rnk_summary %>% dplyr::slice(1:nb.gene)
+  
+  top.genes <- rnk_summary$gene
+  
+  rnk <- filter(rnk, gene %in% top.genes)
+  genes_to_pathway <- filter(genes_to_pathway, gene %in% top.genes)
+  
+  plot_title <- paste0("Top ", nb.gene, " gene ranks in enriched pathways for ", gsea.method.name, " for each PDCL")
+  plot_subtitle <- paste0("Alpha : ", threshold)
+  heatmap <- ggplot(rnk, aes(pdcl, gene, fill = rank)) +
+    geom_tile() +
+    scale_fill_gradient2(
+      high = "red",
+      low = "blue",
+      na.value = "gray30"
+    ) +
+    labs(
+      title = plot_title,
+      subtitle = plot_subtitle,
+      x = "PDCL",
+      y = "Gene Symbol",
+      fill = "Rank"
+    ) +
+    theme(axis.text.x = element_text(angle = 90) ) +
+    scale_y_discrete(limits = rev)
+  heatmap
+}
