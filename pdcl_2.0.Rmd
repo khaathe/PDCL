@@ -168,6 +168,36 @@ for (pdcl in pdcl_names){
 }
 ```
 
+## DESeq2 comparison with PENDA
+
+Here we compare the sign of the log2FoldChange given by DESeq2 with the deregulation
+predicted by PENDA.
+
+```{r comp-deseq2-and-penda, cache=TRUE, fig.width=16, fig.height=10}
+comp_deseq2_penda <- lapply(pdcl_names, function(pdcl){
+  deseq2 <- as.data.frame(deseq2_res_list[[pdcl]])[,c("log2FoldChange", "padj")]
+  x <- merge(deseq2, penda_res, by = "row.names")
+  x <- x[,c("Row.names", "log2FoldChange", "padj", pdcl)]
+  names(x) <- c("gene", "log2FoldChange", "padj", "penda")
+  x
+})
+names(comp_deseq2_penda) <- pdcl_names
+
+lapply(comp_deseq2_penda, function(x){
+  x$deseq2 <- sign(x$log2FoldChange)
+  addmargins(table(x[,c("deseq2", "penda")]))
+})
+
+volcano_comp_deseq2_penda <- volcano.deseq2.vs.penda.all(deseq2_res_list, penda_res, pdcl_names)
+ggsave(
+  "Result/plot/volcano_comp_deseq2_penda.png",
+  plot = volcano_comp_deseq2_penda,
+  width = 16,
+  height = 10
+)
+volcano_comp_deseq2_penda
+```
+
 # GSEA Pathway Enrichment
 
 ## Load Gene Matrix Files (=GMT)
@@ -221,18 +251,14 @@ We must choose a seed to ensure the analysis is reproducible. This is because GS
 set.seed(1)
 
 penda_genes <- row.names(penda_res)
-rank_list_procesed <- lapply(pdcl_names, function(pdcl){
-  rnk <- deseq2_res_list[[pdcl]]$log2FoldChange
-  names(rnk) <- row.names(deseq2_res_list[[pdcl]])
-  not_deregulated_genes <- penda_genes[penda_res[,pdcl] == 0]
-  # Some genes in the PDCL database are not present in the control counts
-  # Thus they are not included in the deseq2 results.
-  not_deregulated_genes <- not_deregulated_genes[not_deregulated_genes %in% names(rnk)]
-  rnk[not_deregulated_genes] <- 0
+rank_list_procesed <- lapply(comp_deseq2_penda, function(x){
+  x <- x[!is.na(x$padj),]
+  keep <- which( sign(x$log2FoldChange) == x$penda)
+  rnk <- x$log2FoldChange[keep]
+  names(rnk) <- x$gene[keep]
   rnk <- sort(rnk, decreasing = T)
   rnk
 })
-names(rank_list_procesed) <- pdcl_names
 
 gsea_processed_res_list <- lapply(rank_list_procesed, run.gsea, gsea_gmt_list)
 saveRDS(gsea_processed_res_list, file = "Result/gsea_processed_pathway_enrichment.rds")
@@ -328,98 +354,37 @@ rnk_processed_collapsed <- collapse.rnk(rank_list_procesed)
 
 # Plot leading edge for GSEA
 
-## Alpha = 0.05
-```{r plot-gsea-genes-rank-5-percent, fig.width=24, fig.height=8}
-gsea_pathway_genes_0.05 <- plot.gsea.pathway.genes(rnk_collapsed, gem_collapsed, "GSEA",  0.05, 100)
-ggsave(
-  "Result/plot/alpha_0.05/gsea_pathway_genes.png",
-  plot = gsea_pathway_genes_0.05,
-  width = 24,
-  height = 8
-)
-gsea_pathway_genes_0.05
+```{r plot-gsea-leading-edge-10-percent, fig.width=24, fig.height=8}
+gsea_leading_edge_0.1 <- lapply(pdcl_names, function(pdcl){
+  plot_tmp <- plot.leading.edge(rnk_collapsed, gem_collapsed, pdcl, 0.1)
+  filepath <- paste0("Result/plot/alpha_0.1/leadingEdge/gsea/", pdcl, "_gsea_leadingedge.png")
+  ggsave(filepath, plot = plot_tmp, width = 24, height = 8)
+  plot_tmp
+})
+names(gsea_leading_edge_0.1) <- pdcl_names
+gsea_leading_edge_0.1
 ```
-
-```{r heatmap-gsea-genes-rank-5-percent, fig.width=12, fig.height=16}
-heatmap_gsea_pathway_genes_0.05 <- heatmap.gsea.gene.ranks(rnk_collapsed, gem_collapsed, "GSEA",  0.05, 100)
-ggsave(
-  "Result/plot/alpha_0.05/heatmap_gsea_pathway_genes.png",
-  plot = heatmap_gsea_pathway_genes_0.05,
-  width = 12,
-  height = 16
-)
-heatmap_gsea_pathway_genes_0.05
-```
-
-## Alpha = 0.1
-```{r plot-gsea-genes-rank-10-percent, fig.width=24, fig.height=12}
-gsea_pathway_genes_0.1 <- plot.gsea.pathway.genes(rnk_collapsed, gem_collapsed, "GSEA",  0.1, 100)
-ggsave(
-  "Result/plot/alpha_0.1/gsea_pathway_genes.png",
-  plot = gsea_pathway_genes_0.1,
-  width = 24,
-  height = 12
-)
-gsea_pathway_genes_0.1
-```
-
-```{r heatmap-gsea-genes-rank-10-percent, fig.width=12, fig.height=16}
-heatmap_gsea_pathway_genes_0.1 <- heatmap.gsea.gene.ranks(rnk_collapsed, gem_collapsed, "GSEA",  0.1, 100)
-ggsave(
-  "Result/plot/alpha_0.1/heatmap_gsea_pathway_genes.png",
-  plot = heatmap_gsea_pathway_genes_0.1,
-  width = 12,
-  height = 16
-)
-heatmap_gsea_pathway_genes_0.1
-```
-
 
 # Plot leading edge for GSEA Processed
 
-## Alpha = 0.05
-
-There isn't any pathways with a FDR below 5% when processing the GSEA ranked list with PENDA results.
-
-```{r num-res-gsea-processed-5-percent}
-gem_collapsed %>% filter(method == "GSEA Processed", fdr < 0.05) %>% count()
+```{r plot-gsea-processed-leading-edge-10-percent, fig.width=24, fig.height=8}
+gsea_processed_leading_edge_0.1 <- lapply(pdcl_names, function(pdcl){
+  plot_tmp <- plot.leading.edge(rnk_processed_collapsed, gem_collapsed, pdcl, 0.1, "GSEA Processed")
+  filepath <- paste0("Result/plot/alpha_0.1/leadingEdge/gsea_processed/", pdcl, "_gsea_processed_leadingedge.png")
+  ggsave(filepath, plot = plot_tmp, width = 24, height = 8)
+  plot_tmp
+})
+names(gsea_processed_leading_edge_0.1) <- pdcl_names
+gsea_processed_leading_edge_0.1
 ```
-
-## Alpha = 0.1
-
-Number of pathways with a FDR value below 10% :
-
-```{r num-res-gsea-processed-10-percent}
-gem_collapsed %>% filter(method == "GSEA Processed", fdr < 0.1) %>% count()
-```
-
-```{r plot-gsea-processed-genes-rank-10-percent, fig.width=24, fig.height=12}
-gsea_processed_pathway_genes_0.1 <- plot.gsea.pathway.genes(rnk_processed_collapsed, gem_collapsed, "GSEA Processed",  0.1, 100)
-ggsave(
-  "Result/plot/alpha_0.1/gsea_processed_pathway_genes.png",
-  plot = gsea_processed_pathway_genes_0.1,
-  width = 24,
-  height = 12
-)
-gsea_processed_pathway_genes_0.1
-```
-
-```{r heatmap-gsea-processed-genes-rank-10-percent, fig.width=12, fig.height=16}
-heatmap_gsea_processed_pathway_genes_0.1 <- heatmap.gsea.gene.ranks(rnk_processed_collapsed, gem_collapsed, "GSEA Processed",  0.1, 100)
-ggsave(
-  "Result/plot/alpha_0.1/heatmap_gsea_processed_pathway_genes.png",
-  plot = heatmap_gsea_processed_pathway_genes_0.1,
-  width = 12,
-  height = 16
-)
-heatmap_gsea_processed_pathway_genes_0.1
-```
-
 
 # Plot Results for alpha = 0.05
 
 ```{r set-alpha-5-percent}
 threshold <- 0.05
+plot_comp_method_dir <- "Result/plot/alpha_0.05/comparison_method/"
+count_dir <- "Result/plot/alpha_0.05/count/"
+heatmap_dir <- "Result/plot/alpha_0.05/heatmap/"
 ```
 
 ### Plot Method vs Method 
@@ -427,15 +392,27 @@ threshold <- 0.05
 #### G:Profiler vs GSEA
 ```{r gprofiler-vs-gsea-5-percent}
 gprofiler_vs_gsea <- plot_method_vs_method(gem_collapsed_method_vs_method, "G:Profiler", "GSEA", threshold)
-ggsave(
-  "Result/plot/alpha_0.05/plot_gprofiler_vs_gsea.png",
-  plot = gprofiler_vs_gsea,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(plot_comp_method_dir, "plot_gprofiler_vs_gsea.png")
+ggsave(tmp_filename, plot = gprofiler_vs_gsea, width = 10, height = 7)
 gprofiler_vs_gsea
 ```
 
+
+#### G:Profiler vs GSEA Processed
+```{r gprofiler-vs-gsea-processed-5-percent}
+gprofiler_vs_gsea_processed <- plot_method_vs_method(gem_collapsed_method_vs_method, "G:Profiler", "GSEA Processed", threshold)
+tmp_filename <- paste0(plot_comp_method_dir, "plot_gprofiler_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = gprofiler_vs_gsea_processed, width = 10, height = 7)
+gprofiler_vs_gsea_processed
+```
+
+#### GSEA vs GSEA Processed
+```{r gsea-vs-gsea-processed-5-percent}
+gsea_vs_gsea_processed <- plot_method_vs_method(gem_collapsed_method_vs_method, "GSEA", "GSEA Processed", threshold)
+tmp_filename <- paste0(plot_comp_method_dir, "plot_gsea_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = gsea_vs_gsea_processed, width = 10, height = 7)
+gsea_vs_gsea_processed
+```
 
 ### Plot count categories 
 
@@ -443,12 +420,8 @@ gprofiler_vs_gsea
 #### All method
 ```{r count-categories-5-percent}
 count_categories_0.05 <- plot.count.categories(gem_collapsed, threshold)
-ggsave(
-  "Result/plot/alpha_0.05/plot_count_categories_0.05.png",
-  plot = count_categories_0.05,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_categories_0.05.png")
+ggsave(tmp_filename, plot = count_categories_0.05, width = 10, height = 7)
 count_categories_0.05
 ```
 
@@ -456,13 +429,27 @@ count_categories_0.05
 ```{r count-categories-gprofiler-vs-gsea-5-percent}
 
 count_categories_gprofiler_vs_gsea_0.05 <- plot.count.categories.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA")
-ggsave(
-  "Result/plot/alpha_0.05/plot_count_categories_gprofiler_vs_gsea_0.05.png",
-  plot = count_categories_gprofiler_vs_gsea_0.05,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_categories_gprofiler_vs_gsea_0.05.png")
+ggsave(tmp_filename, plot = count_categories_gprofiler_vs_gsea_0.05, width = 10, height = 7)
 count_categories_gprofiler_vs_gsea_0.05
+```
+
+#### G:Profiler vs GSEA Processed
+```{r count-categories-gprofiler-vs-gsea_processed-5-percent}
+
+count_categories_gprofiler_vs_gsea_processed_0.05 <- plot.count.categories.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed")
+tmp_filename <- paste0(count_dir, "plot_count_categories_gprofiler_vs_gsea_processed_0.05.png")
+ggsave(tmp_filename, plot = count_categories_gprofiler_vs_gsea_processed_0.05, width = 10, height = 7)
+count_categories_gprofiler_vs_gsea_processed_0.05
+```
+
+#### GSEA vs GSEA Processed
+```{r count-categories-gsea-vs-gsea_processed-5-percent}
+
+count_categories_gsea_vs_gsea_processed_0.05 <- plot.count.categories.m.vs.m(gem_collapsed, all_common_pathways, threshold, "GSEA", "GSEA Processed")
+tmp_filename <- paste0(count_dir, "plot_count_categories_gsea_vs_gsea_processed_0.05.png")
+ggsave(tmp_filename, plot = count_categories_gsea_vs_gsea_processed_0.05, width = 10, height = 7)
+count_categories_gsea_vs_gsea_processed_0.05
 ```
 
 ### Plot count pathways 
@@ -471,12 +458,8 @@ count_categories_gprofiler_vs_gsea_0.05
 
 ```{r count-pathways-5-percent}
 count_pathways_0.05 <- plot.count.pathways(gem_collapsed, threshold)
-ggsave(
-  "Result/plot/alpha_0.05/plot_count_pathways.png",
-  plot = count_pathways_0.05,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_pathways.png")
+ggsave(tmp_filename, plot = count_pathways_0.05, width = 10, height = 7)
 count_pathways_0.05 
 ```
 
@@ -484,13 +467,27 @@ count_pathways_0.05
 
 ```{r count-pathways-gprofiler-vs-gsea-5-percent}
 count_pathways_gprofiler_vs_gsea_0.05 <- plot.count.pathways.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA")
-ggsave(
-  "Result/plot/alpha_0.05/plot_count_pathways_gprofiler_vs_gsea.png",
-  plot = count_pathways_gprofiler_vs_gsea_0.05,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_pathways_gprofiler_vs_gsea.png")
+ggsave(tmp_filename, plot = count_pathways_gprofiler_vs_gsea_0.05, width = 10, height = 7)
 count_pathways_gprofiler_vs_gsea_0.05 
+```
+
+#### G:Profiler vs GSEA Processed
+
+```{r count-pathways-gprofiler-vs-gsea_processed-5-percent}
+count_pathways_gprofiler_vs_gsea_processed_0.05 <- plot.count.pathways.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed")
+tmp_filename <- paste0(count_dir, "plot_count_pathways_gprofiler_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = count_pathways_gprofiler_vs_gsea_processed_0.05, width = 10, height = 7)
+count_pathways_gprofiler_vs_gsea_processed_0.05 
+```
+
+#### GSEA vs GSEA Processed
+
+```{r count-pathways-gsea-vs-gsea_processed-5-percent}
+count_pathways_gsea_vs_gsea_processed_0.05 <- plot.count.pathways.m.vs.m(gem_collapsed, all_common_pathways, threshold, "GSEA", "GSEA Processed")
+tmp_filename <- paste0(count_dir, "plot_count_pathways_gsea_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = count_pathways_gsea_vs_gsea_processed_0.05, width = 10, height = 7)
+count_pathways_gsea_vs_gsea_processed_0.05 
 ```
 
 ### Plot Heatmap FDR 
@@ -500,27 +497,37 @@ Black rectangles indicates pathways that are enriched in two methods selected fo
 
 #### G:Profiler vs GSEA
 
-```{r heatmap-pathways-gprofiler-vs-gsea-5-percent, fig.width=12, fig.height=6}
+```{r heatmap-pathways-gprofiler-vs-gsea-5-percent, fig.width=16, fig.height=10}
 heatmap_pathways_gprofiler_vs_gsea_0.05 <- heatmap.pathways(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA")
-ggsave(
-  "Result/plot/alpha_0.05/heatmap_pathways_gprofiler_vs_gsea.png",
-  plot = heatmap_pathways_gprofiler_vs_gsea_0.05,
-  width = 16,
-  height = 10
-)
+tmp_filename <- paste0(heatmap_dir, "heatmap_pathways_gprofiler_vs_gsea.png")
+ggsave(tmp_filename, plot = heatmap_pathways_gprofiler_vs_gsea_0.05, width = 16, height = 10)
 heatmap_pathways_gprofiler_vs_gsea_0.05
+```
+
+#### G:Profiler vs GSEA Processed
+
+```{r heatmap-pathways-gprofiler-vs-gsea_processed-5-percent, fig.width=16, fig.height=10}
+heatmap_pathways_gprofiler_vs_gsea_processed_0.05 <- heatmap.pathways(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed")
+tmp_filename <- paste0(heatmap_dir, "heatmap_pathways_gprofiler_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = heatmap_pathways_gprofiler_vs_gsea_processed_0.05, width = 16, height = 10)
+heatmap_pathways_gprofiler_vs_gsea_processed_0.05
+```
+
+#### GSEA vs GSEA Processed
+
+```{r heatmap-pathways-gsea-vs-gsea_processed-5-percent,  fig.width=16, fig.height=10}
+heatmap_pathways_gsea_vs_gsea_processed_0.05 <- heatmap.pathways(gem_collapsed, all_common_pathways, threshold, "GSEA", "GSEA Processed")
+tmp_filename <- paste0(heatmap_dir, "heatmap_pathways_gsea_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = heatmap_pathways_gsea_vs_gsea_processed_0.05, width = 16, height = 10)
+heatmap_pathways_gsea_vs_gsea_processed_0.05
 ```
 
 ### Plot heatmap Categories
 
 ```{r heatmap-categories-5-percent, fig.width=16, fig.height=10}
 heatmap_categories_0.05 <- heatmap.categories(gem_collapsed, threshold)
-ggsave(
-  "Result/plot/alpha_0.05/heatmap_categories.png",
-  plot = heatmap_categories_0.05,
-  width = 16,
-  height = 10
-)
+tmp_filename <- paste0(heatmap_dir, "heatmap_categories.png")
+ggsave(tmp_filename, plot = heatmap_categories_0.05, width = 16, height = 10)
 heatmap_categories_0.05
 ```
 
@@ -528,6 +535,9 @@ heatmap_categories_0.05
 
 ```{r set-alpha-10-percent}
 threshold <- 0.1
+plot_comp_method_dir <- "Result/plot/alpha_0.1/comparison_method/"
+count_dir <- "Result/plot/alpha_0.1/count/"
+heatmap_dir <- "Result/plot/alpha_0.1/heatmap/"
 ```
 
 ### Plot Method vs Method 
@@ -535,12 +545,8 @@ threshold <- 0.1
 #### G:Profiler vs GSEA
 ```{r gprofiler-vs-gsea-10-percent}
 gprofiler_vs_gsea <- plot_method_vs_method(gem_collapsed_method_vs_method, "G:Profiler", "GSEA", threshold)
-ggsave(
-  "Result/plot/alpha_0.1/plot_gprofiler_vs_gsea.png",
-  plot = gprofiler_vs_gsea,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(plot_comp_method_dir, "plot_gprofiler_vs_gsea.png")
+ggsave(tmp_filename, plot = gprofiler_vs_gsea, width = 10, height = 7)
 gprofiler_vs_gsea
 ```
 
@@ -548,38 +554,27 @@ gprofiler_vs_gsea
 #### G:Profiler vs GSEA Processed
 ```{r gprofiler-vs-gsea-processed-10-percent}
 gprofiler_vs_gsea_processed <- plot_method_vs_method(gem_collapsed_method_vs_method, "G:Profiler", "GSEA Processed", threshold)
-ggsave(
-  "Result/plot/alpha_0.1/plot_gprofiler_vs_gsea_processed.png",
-  plot = gprofiler_vs_gsea_processed,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(plot_comp_method_dir, "plot_gprofiler_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = gprofiler_vs_gsea_processed, width = 10, height = 7)
 gprofiler_vs_gsea_processed
 ```
 
 #### GSEA vs GSEA Processed
 ```{r gsea-vs-gsea-processed-10-percent}
 gsea_vs_gsea_processed <- plot_method_vs_method(gem_collapsed_method_vs_method, "GSEA", "GSEA Processed", threshold)
-ggsave(
-  "Result/plot/alpha_0.1/plt_gsea_vs_gsea_processed.png",
-  plot = gsea_vs_gsea_processed,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(plot_comp_method_dir, "plot_gsea_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = gsea_vs_gsea_processed, width = 10, height = 7)
 gsea_vs_gsea_processed
 ```
+
 ### Plot count categories 
 
 
 #### All method
 ```{r count-categories-10-percent}
 count_categories_0.1 <- plot.count.categories(gem_collapsed, threshold)
-ggsave(
-  "Result/plot/alpha_0.1/plot_count_categories_0.1.png",
-  plot = count_categories_0.1,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_categories_0.1.png")
+ggsave(tmp_filename, plot = count_categories_0.1, width = 10, height = 7)
 count_categories_0.1
 ```
 
@@ -587,12 +582,8 @@ count_categories_0.1
 ```{r count-categories-gprofiler-vs-gsea-10-percent}
 
 count_categories_gprofiler_vs_gsea_0.1 <- plot.count.categories.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA")
-ggsave(
-  "Result/plot/alpha_0.1/plot_count_categories_gprofiler_vs_gsea_0.1.png",
-  plot = count_categories_gprofiler_vs_gsea_0.1,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_categories_gprofiler_vs_gsea_0.1.png")
+ggsave(tmp_filename, plot = count_categories_gprofiler_vs_gsea_0.1, width = 10, height = 7)
 count_categories_gprofiler_vs_gsea_0.1
 ```
 
@@ -600,12 +591,8 @@ count_categories_gprofiler_vs_gsea_0.1
 ```{r count-categories-gprofiler-vs-gsea_processed-10-percent}
 
 count_categories_gprofiler_vs_gsea_processed_0.1 <- plot.count.categories.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed")
-ggsave(
-  "Result/plot/alpha_0.1/plot_count_categories_gprofiler_vs_gsea_processed_0.1.png",
-  plot = count_categories_gprofiler_vs_gsea_processed_0.1,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_categories_gprofiler_vs_gsea_processed_0.1.png")
+ggsave(tmp_filename, plot = count_categories_gprofiler_vs_gsea_processed_0.1, width = 10, height = 7)
 count_categories_gprofiler_vs_gsea_processed_0.1
 ```
 
@@ -613,26 +600,19 @@ count_categories_gprofiler_vs_gsea_processed_0.1
 ```{r count-categories-gsea-vs-gsea_processed-10-percent}
 
 count_categories_gsea_vs_gsea_processed_0.1 <- plot.count.categories.m.vs.m(gem_collapsed, all_common_pathways, threshold, "GSEA", "GSEA Processed")
-ggsave(
-  "Result/plot/alpha_0.1/plot_count_categories_gsea_vs_gsea_processed_0.1.png",
-  plot = count_categories_gsea_vs_gsea_processed_0.1,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_categories_gsea_vs_gsea_processed_0.1.png")
+ggsave(tmp_filename, plot = count_categories_gsea_vs_gsea_processed_0.1, width = 10, height = 7)
 count_categories_gsea_vs_gsea_processed_0.1
 ```
+
 ### Plot count pathways 
 
 #### All Method
 
 ```{r count-pathways-10-percent}
 count_pathways_0.1 <- plot.count.pathways(gem_collapsed, threshold)
-ggsave(
-  "Result/plot/alpha_0.1/plot_count_pathways.png",
-  plot = count_pathways_0.1,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_pathways.png")
+ggsave(tmp_filename, plot = count_pathways_0.1, width = 10, height = 7)
 count_pathways_0.1 
 ```
 
@@ -640,12 +620,8 @@ count_pathways_0.1
 
 ```{r count-pathways-gprofiler-vs-gsea-10-percent}
 count_pathways_gprofiler_vs_gsea_0.1 <- plot.count.pathways.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA")
-ggsave(
-  "Result/plot/alpha_0.1/plot_count_pathways_gprofiler_vs_gsea.png",
-  plot = count_pathways_gprofiler_vs_gsea_0.1,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_pathways_gprofiler_vs_gsea.png")
+ggsave(tmp_filename, plot = count_pathways_gprofiler_vs_gsea_0.1, width = 10, height = 7)
 count_pathways_gprofiler_vs_gsea_0.1 
 ```
 
@@ -653,12 +629,8 @@ count_pathways_gprofiler_vs_gsea_0.1
 
 ```{r count-pathways-gprofiler-vs-gsea_processed-10-percent}
 count_pathways_gprofiler_vs_gsea_processed_0.1 <- plot.count.pathways.m.vs.m(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed")
-ggsave(
-  "Result/plot/alpha_0.1/plot_count_pathways_gprofiler_vs_gsea_processed.png",
-  plot = count_pathways_gprofiler_vs_gsea_processed_0.1,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_pathways_gprofiler_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = count_pathways_gprofiler_vs_gsea_processed_0.1, width = 10, height = 7)
 count_pathways_gprofiler_vs_gsea_processed_0.1 
 ```
 
@@ -666,12 +638,8 @@ count_pathways_gprofiler_vs_gsea_processed_0.1
 
 ```{r count-pathways-gsea-vs-gsea_processed-10-percent}
 count_pathways_gsea_vs_gsea_processed_0.1 <- plot.count.pathways.m.vs.m(gem_collapsed, all_common_pathways, threshold, "GSEA", "GSEA Processed")
-ggsave(
-  "Result/plot/alpha_0.1/plot_count_pathways_gsea_vs_gsea_processed.png",
-  plot = count_pathways_gsea_vs_gsea_processed_0.1,
-  width = 10,
-  height = 7
-)
+tmp_filename <- paste0(count_dir, "plot_count_pathways_gsea_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = count_pathways_gsea_vs_gsea_processed_0.1, width = 10, height = 7)
 count_pathways_gsea_vs_gsea_processed_0.1 
 ```
 
@@ -684,12 +652,8 @@ Black rectangles indicates pathways that are enriched in two methods selected fo
 
 ```{r heatmap-pathways-gprofiler-vs-gsea-10-percent, fig.width=16, fig.height=10}
 heatmap_pathways_gprofiler_vs_gsea_0.1 <- heatmap.pathways(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA")
-ggsave(
-  "Result/plot/alpha_0.1/heatmap_pathways_gprofiler_vs_gsea.png",
-  plot = heatmap_pathways_gprofiler_vs_gsea_0.1,
-  width = 16,
-  height = 10
-)
+tmp_filename <- paste0(heatmap_dir, "heatmap_pathways_gprofiler_vs_gsea.png")
+ggsave(tmp_filename, plot = heatmap_pathways_gprofiler_vs_gsea_0.1, width = 16, height = 10)
 heatmap_pathways_gprofiler_vs_gsea_0.1
 ```
 
@@ -697,12 +661,8 @@ heatmap_pathways_gprofiler_vs_gsea_0.1
 
 ```{r heatmap-pathways-gprofiler-vs-gsea_processed-10-percent, fig.width=16, fig.height=10}
 heatmap_pathways_gprofiler_vs_gsea_processed_0.1 <- heatmap.pathways(gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed")
-ggsave(
-  "Result/plot/alpha_0.1/heatmap_pathways_gprofiler_vs_gsea_processed.png",
-  plot = heatmap_pathways_gprofiler_vs_gsea_processed_0.1,
-  width = 16,
-  height = 10
-)
+tmp_filename <- paste0(heatmap_dir, "heatmap_pathways_gprofiler_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = heatmap_pathways_gprofiler_vs_gsea_processed_0.1, width = 16, height = 10)
 heatmap_pathways_gprofiler_vs_gsea_processed_0.1
 ```
 
@@ -710,12 +670,8 @@ heatmap_pathways_gprofiler_vs_gsea_processed_0.1
 
 ```{r heatmap-pathways-gsea-vs-gsea_processed-10-percent,  fig.width=16, fig.height=10}
 heatmap_pathways_gsea_vs_gsea_processed_0.1 <- heatmap.pathways(gem_collapsed, all_common_pathways, threshold, "GSEA", "GSEA Processed")
-ggsave(
-  "Result/plot/alpha_0.1/heatmap_pathways_gsea_vs_gsea_processed.png",
-  plot = heatmap_pathways_gsea_vs_gsea_processed_0.1,
-  width = 16,
-  height = 10
-)
+tmp_filename <- paste0(heatmap_dir, "heatmap_pathways_gsea_vs_gsea_processed.png")
+ggsave(tmp_filename, plot = heatmap_pathways_gsea_vs_gsea_processed_0.1, width = 16, height = 10)
 heatmap_pathways_gsea_vs_gsea_processed_0.1
 ```
 
@@ -723,37 +679,12 @@ heatmap_pathways_gsea_vs_gsea_processed_0.1
 
 ```{r heatmap-categories-10-percent, fig.width=16, fig.height=10}
 heatmap_categories_0.1 <- heatmap.categories(gem_collapsed, threshold)
-ggsave(
-  "Result/plot/alpha_0.1/heatmap_categories.png",
-  plot = heatmap_categories_0.1,
-  width = 16,
-  height = 10
-)
+tmp_filename <- paste0(heatmap_dir, "heatmap_categories.png")
+ggsave(tmp_filename, plot = heatmap_categories_0.1, width = 16, height = 10)
 heatmap_categories_0.1
 ```
 
-### Plot Commons Genes
-
-#### G:Profiler vs GSEA Processed
-
-```{r plot-common-pathway-genes-10-percent, fig.width=20, fig.height=10}
-plot_common_pathway_genes_0.1 <- plot.common.pathway.genes(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed", "method_2", 100)
-ggsave(
-  "Result/plot/alpha_0.1/common_pathway_genes.png",
-  plot = plot_common_pathway_genes_0.1,
-  width = 20,
-  height = 10
-)
-plot_common_pathway_genes_0.1
+```{r save-workspace, include=FALSE}
+save.image("~/PhD/PDCL/pdcl.RData")
 ```
 
-```{r heatmap-common-genes-rank-10-percent, fig.width=14, fig.height=20}
-heatmap_common_pathway_genes_0.1 <- heatmap.common.gene.ranks(rnk_processed_collapsed, gem_collapsed, all_common_pathways, threshold, "G:Profiler", "GSEA Processed", "method_2", 100)
-ggsave(
-  "Result/plot/alpha_0.1/heatmap_common_pathway_genes_0.1.png",
-  plot = heatmap_common_pathway_genes_0.1,
-  width = 14,
-  height = 20
-)
-heatmap_common_pathway_genes_0.1
-```
