@@ -1,6 +1,8 @@
 ######## Load Library needed
 library(ggplot2)
 library(ggh4x)
+library(tidyr)
+library(purrr)
 
 # Made by Jorge
 #Define undesired words
@@ -285,7 +287,7 @@ plot_method_vs_method <- function(x, m1, m2, threshold){
     labs(
       title = paste0( m1, " against ", m2),
       subtitle = paste0("Threshold alpha : ", threshold),
-      x = paste0( "-log10(fdr ",  m2, ")"),
+      x = paste0( "-log10(fdr ",  m1, ")"),
       y = paste0( "-log10(fdr ",  m2, ")"),
       colour = ""
     ) +
@@ -475,6 +477,7 @@ heatmap.pathways <- function(collapsed.by.method, common.pathways, threshold, m1
         title = "Category"
       )
     )
+  heatmap_plot
 }
 
 heatmap.categories <- function(collapsed.by.method, threshold){
@@ -521,149 +524,99 @@ get.genes.in.pathway <- function(collapsed.by.method){
     dplyr::rename(gene = genes)
 }
 
-get.genes.in.common.pathways <- function(collapsed.by.method, all.common.pathways, threshold, m1, m2, common.method.col){
+plot.leading.edge <- function(rnk.collapsed, collapsed.by.method, pdcl.name, threshold, gsea.method.name = "GSEA", nb.max.genes=100, pathways = NULL){
+  data <- get.genes.in.pathway(collapsed.by.method) %>% 
+    filter(method == gsea.method.name, fdr < threshold, pdcl == pdcl.name)
+  
+  if ( !is.null(pathways) ){
+    data <- filter(data, pathway_id %in% pathways)
+  }
+  
+  if( nrow(data) == 0){
+    warning("No pathway found enriched for : ", pdcl.name, " at alpha = ", threshold)
+    return(NULL)
+  }
+  
+  rnk <- rnk.collapsed %>% filter(pdcl == pdcl.name)
+  
+  data <- data %>% 
+    inner_join(rnk, by=c("pdcl", "gene")) %>%
+    mutate(abs_rank = abs(rank), dereg = sign(rank) )
+  data$dereg <- factor(data$dereg, levels = c(1, -1), labels = c("upregulated", "downregulated"))
+  
+  nb_gene_pdcl <- n_distinct(data$gene)
+  if ( nb_gene_pdcl > nb.max.genes ){
+    keep <- data %>% 
+      distinct(gene, rank) %>% 
+      arrange(desc(abs(rank))) %>% 
+      slice(1:nb.max.genes) %>% 
+      pull(gene)
+    data <- filter(data, gene %in% keep)
+  }
+  
+  plot_title <- paste0("Top ", nb.max.genes , " genes in enriched pathways for ", pdcl.name)
+  plot_subtitle <- paste0("Alpha : ", threshold, ", Total number of different genes in pathways leading edge : ", nb_gene_pdcl)
+  plot_leading_edge <- ggplot(data, aes(gene, pathway_id, size = abs_rank, colour = dereg) ) +
+    geom_point() + 
+    labs(
+      title = plot_title,
+      subtitle = plot_subtitle,
+      x = "Gene Symbol",
+      y = "Pathways",
+      size = "abs(rank)",
+      colour = ""
+    ) +
+    scale_colour_manual( values = c("upregulated" = "red", "downregulated"="blue") ) +
+    theme(axis.text.x = element_text(angle = 90) ) +
+    scale_y_discrete(limits = rev)
+  plot_leading_edge
+}
+
+plot.common.pathway.leading.edge <- function(rnk.collapsed, collapsed.by.method, pdcl.name, threshold, all.common.pathways, m1="G:Profiler", m2="GSEA", gsea.method.name = m2, nb.max.genes=100){
   alpha_col <- paste0("alpha_", threshold)
   common_pathways <- all_common_pathways %>%
-    filter( .data[[alpha_col]] == "Common Pathways", method_1 == m1, method_2 == m2) %>%
-    dplyr::rename(method = all_of(common.method.col))
-  
-  genes.in.common.pathways <- get.genes.in.pathway(collapsed.by.method) %>%
-    inner_join(common_pathways, by = c("pdcl", "pathway_id", "method"))
-  genes.in.common.pathways
+    filter( .data[[alpha_col]] == "Common Pathways", method_1 == m1, method_2 == m2, pdcl == pdcl.name) %>%
+    distinct(pathway_id) %>%
+    pull(pathway_id)
+  if( length(common_pathways) == 0){
+    warning("No common pathway found between : ", m1, " and ", m2, " for ", pdcl.name)
+  }
+  plot.leading.edge(rnk.collapsed, collapsed.by.method, pdcl.name, threshold, gsea.method.name, nb.max.genes, common_pathways)
 }
 
-plot.common.pathway.genes <- function(rnk.collapsed, collapsed.by.method, all.common.pathways, threshold, m1, m2, gsea.col, nb.gene){
-  genes.in.common.pathways <- get.genes.in.common.pathways(collapsed.by.method, all.common.pathways, threshold, m1, m2, gsea.col) %>%
-    add_count(pathway_id, gene)
-  
-  rnk <- rnk.collapsed %>% filter(gene %in% unique(genes.in.common.pathways$gene)) 
-  rnk_summary <- summarize.rank(rnk)
-  rnk_summary <- rnk_summary %>% dplyr::slice(1:nb.gene)
-  
-  top.genes <- rnk_summary$gene
-  
-  rnk <- filter(rnk, gene %in% top.genes)
-  genes.in.common.pathways <- filter(genes.in.common.pathways, gene %in% top.genes)
-  
-  plot_title <- paste0("Top ", nb.gene, " genes in common pathways")
-  plot_subtitle <- paste0("Pathways are common between : ", m1, " and ", m2)
-  plot <- ggplot(genes.in.common.pathways, aes(gene, pathway_id, size = n) ) +
+plot.volcano <- function(data){
+  ggplot(
+    data, 
+    aes( log2FoldChange, -log10(padj), colour = penda_predict, alpha = penda_predict )
+  ) +
     geom_point() +
+    scale_colour_manual( values = c("1" = "red", "-1"="blue", "0" = "grey50") )  +
+    scale_alpha_manual(values = c("1" = 0.8, "-1" = 0.8, "0" = 0.4) ) +
     labs(
-      title = plot_title,
-      subtitle = plot_subtitle,
-      x = "Gene Symbol",
-      y = "Pathways",
-      size = "Number of PDCL"
-    ) +
-    theme(axis.text.x = element_text(angle = 90) ) +
-    scale_y_discrete(limits = rev)
-  plot
+      title = "Comparison DESeq2 fold change vs PENDA Result",
+      colour = "Penda Prediction", 
+      alpha = "Penda Prediction"
+    )
 }
 
-heatmap.common.gene.ranks <- function(rnk.collapsed, collapsed.by.method, all.common.pathways, threshold, m1, m2, gsea.col, nb.gene){
-  genes.in.common.pathways <- get.genes.in.common.pathways(collapsed.by.method, all.common.pathways, threshold, m1, m2, gsea.col) %>%
-    add_count(pathway_id, gene)
+volcano.deseq2.vs.penda <- function(deseq2_res_list, penda_res, pdcl){
+  data <- merge(as.data.frame(deseq2_res_list[[pdcl]]), penda_res, by="row.names")
+  data <- data %>% select(log2FoldChange, padj, all_of(pdcl)) %>%
+    dplyr::rename( penda_predict = all_of(pdcl) )
+  data$penda_predict <- factor(data$penda_predict)
   
-  rnk <- rnk.collapsed %>% filter(gene %in% unique(genes.in.common.pathways$gene)) 
-  rnk_summary <- summarize.rank(rnk)
-  rnk_summary <- rnk_summary %>% dplyr::slice(1:nb.gene)
-  
-  top.genes <- rnk_summary$gene
-  
-  rnk <- filter(rnk, gene %in% top.genes)
-  genes.in.common.pathways <- filter(genes.in.common.pathways, gene %in% top.genes)
-  
-  plot_title <- paste0("Top ", nb.gene, " genes rank in common pathways")
-  plot_subtitle <- paste0("Pathways are common between : ", m1, " and ", m2)
-  heatmap <- ggplot(rnk, aes(pdcl, gene, fill = rank)) +
-    geom_tile() +
-    scale_fill_gradient2(
-      high = "red",
-      low = "blue",
-      na.value = "gray30"
-    ) +
-    geom_tile(
-      data = genes.in.common.pathways,
-      mapping = aes(x = pdcl, y = gene),
-      inherit.aes = F,
-      colour = 'black',
-      fill = NA,
-      size = 0.5
-    ) +
-    labs(
-      title = plot_title,
-      subtitle = plot_subtitle,
-      x = "PDCL",
-      y = "Gene Symbol",
-      fill = "Rank"
-    ) +
-    theme(axis.text.x = element_text(angle = 90) ) +
-    scale_y_discrete(limits = rev)
-  heatmap
+  plot_title <- paste0("Comparison DESeq2 fold change vs PENDA Result for ", pdcl)
+  plot.volcano(data) + labs(title = plot_title )
 }
 
-
-plot.gsea.pathway.genes <- function(rnk.collapsed, collapsed.by.method, gsea.method.name, threshold, nb.gene){
-  genes_to_pathway <- get.genes.in.pathway(collapsed.by.method) %>%
-    filter(fdr<threshold, method == gsea.method.name) %>%
-    add_count(pathway_id, gene)
-  
-  rnk <- rnk.collapsed %>% filter(gene %in% unique(genes_to_pathway$gene)) 
-  rnk_summary <- summarize.rank(rnk)
-  rnk_summary <- rnk_summary %>% dplyr::slice(1:nb.gene)
-  
-  top.genes <- rnk_summary$gene
-  
-  rnk <- filter(rnk, gene %in% top.genes)
-  genes_to_pathway <- filter(genes_to_pathway, gene %in% top.genes)
-  
-  plot_title <- paste0("Top ", nb.gene, " genes in enriched pathways for ", gsea.method.name)
-  plot_subtitle <- paste0("Alpha : ", threshold)
-  plot <- ggplot(genes_to_pathway, aes(gene, pathway_id, size = n) ) +
-    geom_point() +
-    labs(
-      title = plot_title,
-      subtitle = plot_subtitle,
-      x = "Gene Symbol",
-      y = "Pathways",
-      size = "Number of PDCL"
-    ) +
-    theme(axis.text.x = element_text(angle = 90) ) +
-    scale_y_discrete(limits = rev)
-  plot
-}
-
-heatmap.gsea.gene.ranks <- function(rnk.collapsed, collapsed.by.method, gsea.method.name, threshold, nb.gene){
-  genes_to_pathway <- get.genes.in.pathway(collapsed.by.method) %>%
-    filter(fdr<threshold, method == gsea.method.name)
-  
-  rnk <- rnk.collapsed %>% filter(gene %in% unique(genes_to_pathway$gene)) 
-  rnk_summary <- summarize.rank(rnk)
-  rnk_summary <- rnk_summary %>% dplyr::slice(1:nb.gene)
-  
-  top.genes <- rnk_summary$gene
-  
-  rnk <- filter(rnk, gene %in% top.genes)
-  genes_to_pathway <- filter(genes_to_pathway, gene %in% top.genes)
-  
-  plot_title <- paste0("Top ", nb.gene, " gene ranks in enriched pathways for ", gsea.method.name, " for each PDCL")
-  plot_subtitle <- paste0("Alpha : ", threshold)
-  heatmap <- ggplot(rnk, aes(pdcl, gene, fill = rank)) +
-    geom_tile() +
-    scale_fill_gradient2(
-      high = "red",
-      low = "blue",
-      na.value = "gray30"
-    ) +
-    labs(
-      title = plot_title,
-      subtitle = plot_subtitle,
-      x = "PDCL",
-      y = "Gene Symbol",
-      fill = "Rank"
-    ) +
-    theme(axis.text.x = element_text(angle = 90) ) +
-    scale_y_discrete(limits = rev)
-  heatmap
+volcano.deseq2.vs.penda.all <- function(deseq2_res_list, penda_res, pdcl_names){
+  df <- map_dfr(pdcl_names, function(pdcl){
+    data <- merge(as.data.frame(deseq2_res_list[[pdcl]]), penda_res, by="row.names")
+    data <- data %>% 
+      select(log2FoldChange, padj, all_of(pdcl) ) %>%
+      dplyr::rename( penda_predict = all_of(pdcl) ) %>%
+      mutate(pdcl = pdcl)
+  })
+  df$penda_predict <- as.factor(df$penda_predict)
+  plot.volcano(df) + facet_wrap(~pdcl)
 }
