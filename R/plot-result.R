@@ -110,37 +110,6 @@ method_vs_method <- function(collapsed_by_method, m1_name, m2_name){
   m_vs_m
 }
 
-collapse.data.by.pathways <- function(gost.penda.gem, gsea.deseq2.gem, pdcl.samples.name, db.source){
-  collapsed <- data.frame()
-  for (pdcl in pdcl.samples.name){
-    for (db in db.source) {
-      gost <- gost.penda.gem[[pdcl]][[db]]
-      gsea <- gsea.deseq2.gem[[pdcl]][[db]]
-      join <- gost %>% 
-        full_join(gsea, by = "pathway_id") %>%
-        dplyr::rename(p_value_gprofiler = p_value.x, p_value_gsea = p_value.y, fdr_gprofiler = fdr.x, fdr_gsea = fdr.y) %>%
-        select(pathway_id, p_value_gprofiler, fdr_gprofiler, p_value_gsea, fdr_gsea) %>%
-        mutate(pdcl = pdcl, db = db) 
-      collapsed <- rbind(collapsed, join)
-    }
-  }
-  collapsed
-}
-
-collapse.data.by.method <- function(collapsed.by.pathways){
-  gprofiler <- collapsed.by.pathways %>%
-    select(pathway_id, fdr_gprofiler, pdcl, db, category) %>%
-    dplyr::rename(fdr = fdr_gprofiler) %>%
-    mutate(method = "gprofiler")
-  
-  gsea <- collapsed.by.pathways %>%
-    select(pathway_id, fdr_gsea, pdcl, db, category) %>%
-    dplyr::rename(fdr = fdr_gsea) %>%
-    mutate(method = "gsea")
-  
-  rbind(gprofiler, gsea)
-}
-
 collapse.gem.list <- function(gem_list){
   collapsed_by_method <- gem_list
   collapsed_by_method <-  map_depth(.x = collapsed_by_method, .depth = 2, .f = function(x){
@@ -191,22 +160,6 @@ collapse.method.vs.method <- function(collapsed_by_method){
   collapsed_by_pathways
 }
 
-find.common.pathways <- function(collapsed.by.pathways, threshold){
-  common <- collapsed.by.pathways 
-  common <- common %>%
-    mutate(is.common = ( common$fdr_gprofiler<threshold & common$fdr_gsea<threshold ) ) %>%
-    select(pdcl, pathway_id, is.common)
-  common$is.common[is.na(common$is.common)] <- F
-  
-  common$is.common <- factor(
-    common$is.common, 
-    levels = c("TRUE", "FALSE"), 
-    labels = c("Common Pathways", "Specific Pathways")
-  )
-  
-  common
-}
-
 find.method.common.pathways <- function(collapsed_method_vs_method, threshold_vect){
   common <- collapsed_method_vs_method
   for ( threshold in threshold_vect){
@@ -237,34 +190,6 @@ assign.categories <- function(x){
     }
   }
   data
-}
-
-plot.gprofiler.vs.gsea <- function(x){
-  ggplot(
-    data = x, 
-    aes(
-      x = -log10(fdr_gprofiler), 
-      y = -log10(fdr_gsea),
-      colour = is.common
-    )
-  ) +
-    geom_point(
-      size = 0.5
-    ) +
-    scale_colour_manual(values = c("red", "grey30")) +
-    facet_wrap(vars(pdcl)) +
-    labs(
-      title = "G:Profiler against GSEA",
-      subtitle = paste0("Threshold alpha : ", threshold),
-      x = "-log10(pvalue G:Profiler)",
-      y = "-log10(pvalue GSEA)",
-      colour = ""
-    ) +
-    theme(
-      plot.title = element_text(hjust = 0.5,face = "bold",color = "red"),
-      plot.subtitle = element_text(hjust = 0.5,face = "italic",color = "blue"),
-      axis.text.x = element_text(angle = 90)
-    ) 
 }
 
 plot_method_vs_method <- function(x, m1, m2, threshold){
@@ -508,13 +433,6 @@ collapse.rnk <- function(rnk){
   })
   rnk$pdcl <- factor(rnk$pdcl)
   rnk
-}
-
-summarize.rank <- function(rnk.collaspe){
-  rnk.collaspe %>% 
-    group_by(gene) %>% 
-    summarise(mean = mean(rank), sd = sd(rank), abs.mean = mean(abs(rank))) %>%
-    arrange(desc(abs.mean))
 }
 
 get.genes.in.pathway <- function(collapsed.by.method){
