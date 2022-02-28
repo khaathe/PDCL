@@ -137,7 +137,7 @@ count_metadata$condition <- as.factor(count_metadata$condition)
 
 Perform a differential analysis for each PDCL in the database against the controls.
 
-```{r run-deseq2, cache=TRUE, include=FALSE}
+```{r run-deseq2, cache=TRUE}
 deseq2_res_list <- lapply(pdcl_names, function(pdcl){
   dataset_pdcl <- c(control_names, pdcl)
   # Subract a dataset which contains only the counts for the
@@ -219,7 +219,7 @@ Here we run a GSEA pathway enrichment analysis with the log2FoldChange calculate
 
 We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
 
-```{r run-gsea, cache=TRUE, include=FALSE}
+```{r run-gsea, cache=TRUE}
 set.seed(1)
 # Create the ranked list for GSEA
 rank_list <- lapply(deseq2_res_list, function(x){
@@ -247,7 +247,7 @@ We cannot trust the DESeq2 p-value as the condition for the test were not satisf
 
 We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
 
-```{r run-gsea-processed, cache=TRUE, include=FALSE}
+```{r run-gsea-processed, cache=TRUE}
 set.seed(1)
 
 penda_genes <- row.names(penda_res)
@@ -294,7 +294,7 @@ gprofiler_gmt_list <- list(reactome = reactome_gmt_token)
 
 Run G:Profiler for PENDA result
 
-```{r run-gprofiler, cache=TRUE, include=FALSE}
+```{r run-gprofiler, cache=TRUE}
 all_pdcl_genes <- row.names(penda_res)
 gost_res_list <- lapply(penda_res, function(pdcl){
   gene_list <- all_pdcl_genes[pdcl != 0]
