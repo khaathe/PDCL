@@ -175,7 +175,7 @@ collapse.method.vs.method <- function(collapsed_by_method){
 }
 
 # Find the pathway common between 2 method in a data.frame for each threshold specified
-# in the threshold_vect arg. The collapsed_method_vs_method is a data.frame given by the function
+# in the threshold_vect arg. The collapsed_method_vs_method is a data.frame given by the function
 # collapse.method.vs.method.
 find.method.common.pathways <- function(collapsed_method_vs_method, threshold_vect){
   common <- collapsed_method_vs_method
@@ -441,7 +441,8 @@ heatmap.pathways <- function(collapsed.by.method, common.pathways, threshold, m1
         labels = rev(category_df$category),
         title = "Category"
       )
-    )
+    ) +
+    theme(panel.background = element_rect(fill = "white"))
   heatmap_plot
 }
 
@@ -559,7 +560,7 @@ plot.common.pathway.leading.edge <- function(rnk.collapsed, collapsed.by.method,
   plot.leading.edge(rnk.collapsed, collapsed.by.method, pdcl.name, threshold, gsea.method.name, nb.max.genes, common_pathways)
 }
 
-# Volcano plot to compare the deregulation type (up or down)
+# Volcano plot to compare the deregulation type (up or down)
 # between DESeq2 and PENDA 
 plot.volcano <- function(data){
   ggplot(
