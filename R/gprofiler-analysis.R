@@ -2,6 +2,7 @@
 library(gprofiler2)
 library(dplyr)
 
+# Run gost analysis for each GMT files provided in the gmt.list arg
 run.gost <- function(genes.symbol, domain, gmt.list){
   lapply(gmt.list, function(gmt){
     gost(

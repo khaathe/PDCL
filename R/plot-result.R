@@ -1,10 +1,13 @@
+# Thanks to Jorge Bretonnes-Santamarina who created the algorithm to assign categories, defined
+# the regular expression in word_list and underesired_words.
+
 ######## Load Library needed
 library(ggplot2)
 library(ggh4x)
 library(tidyr)
 library(purrr)
 
-# Made by Jorge
+# Made by Jorge Bretonnes-Santamarina
 #Define undesired words
 undesired_words <- c("developmental","valproic acid","disease","\\breproduction\\b","^(?=.*stem)(?!.*recept).*$","hemostasis","congenital","mouse","\\srat(\\b|s\\b)","ataxia","^(?=.*(\\b|ch)l1(\\b|cam))(?!.*(adhesion|signal)).*$",
                      "\\bcrcp\\b","\\bvpr\\b","fibrin clot","\\bclotting\\b","bacteri","\\bhost","diabete","defective","parkinson","microb","alzheimer","salmonella",
@@ -22,7 +25,7 @@ undesired_words <- c("developmental","valproic acid","disease","\\breproduction\
                      "fibrino","\\bampa\\b","density lipoprotein","nep/ns2","\\bdectin","\\btube\\b","isotype","hodgkin and reed-sternberg","insulin resistance","hypertension",
                      "dysfunction","potentiation","\\bduct\\b","platelet","\\bph\\b","\\blectin\\b","\\bspike\\b","ossification","abacavir","phenylketonuria")
 
-# Made by Jorge
+# Made by Jorge Bretonnes-Santamarina
 #Define list of regexp that determine how pathways will be assigned into Reactome categories
 word_list <- list(
   #Autophagy
@@ -90,6 +93,8 @@ word_list <- list(
                             "^(?=.*insulin)(?=.*(recept|stimulus|process)).*$","insulin-like","\\bp38","oncostatin")
 )
 
+# Generic function turn a list into a data.frame.
+# Used by the collapse.gem.list function.
 map.list.to.df <- function(x, var_name){
   map2_dfr(x, names(x), function(el, el_name){
     el[,var_name] = el_name
@@ -110,6 +115,11 @@ method_vs_method <- function(collapsed_by_method, m1_name, m2_name){
   m_vs_m
 }
 
+# Collapse a list of GEM results into one data.frame with :
+# - all the column from a GEM file (https://enrichmentmap.readthedocs.io/en/latest/FileFormats.html#generic-results-files)
+# - db : Source of pathway informations (ex: Reactome)
+# - pdcl : ID of the pdcl used for the enrichment analysis
+# - method : the enrichment method that has generated this result (ex: GSEA, G:Profiler) 
 collapse.gem.list <- function(gem_list){
   collapsed_by_method <- gem_list
   collapsed_by_method <-  map_depth(.x = collapsed_by_method, .depth = 2, .f = function(x){
@@ -147,6 +157,10 @@ collapse.gem.list <- function(gem_list){
   collapsed_by_method
 }
 
+# Create a data.frame where one line contain the P-Value and FDR result for
+# 2 different enrichment method (ex: G:Profiler vs GSEA). Usefull to compare
+# the result of two methods. The collapsed_by_method is a data.frame given by the function
+# collapse.gem.list .
 collapse.method.vs.method <- function(collapsed_by_method){
   method_names <- unique(collapsed_by_method$method)
   collapsed_by_pathways <- data.frame()
@@ -160,6 +174,9 @@ collapse.method.vs.method <- function(collapsed_by_method){
   collapsed_by_pathways
 }
 
+# Find the pathway common between 2 method in a data.frame for each threshold specified
+# in the threshold_vect arg. The collapsed_method_vs_method is a data.frame given by the function
+# collapse.method.vs.method.
 find.method.common.pathways <- function(collapsed_method_vs_method, threshold_vect){
   common <- collapsed_method_vs_method
   for ( threshold in threshold_vect){
@@ -177,6 +194,9 @@ find.method.common.pathways <- function(collapsed_method_vs_method, threshold_ve
   common %>% select(all_of(col_to_keep))
 }
 
+# Assign categories to pathways by performing a regular expression test using the regular 
+# expression defined in word_list.
+# This method is based on Jorge Bretonnes-Santamarina works.
 assign.categories <- function(x){
   data <- x
   undesired_words <- paste0(undesired_words,collapse = "|")
@@ -192,8 +212,11 @@ assign.categories <- function(x){
   data
 }
 
-plot_method_vs_method <- function(x, m1, m2, threshold){
-  data <- x %>% filter(method_1 == m1, method_2 == m2)
+# Plot the FDR value of all pathways in the enrichment analysis
+# results of each PDCL.
+# Usefull to compare correlation between 2 method.
+plot_method_vs_method <- function(collapsed_method_vs_method, m1, m2, threshold){
+  data <- collapsed_method_vs_method %>% filter(method_1 == m1, method_2 == m2)
   alpha_col <- paste0("alpha_", threshold)
   data$is.common <- data[,alpha_col]
   ggplot(
@@ -223,6 +246,8 @@ plot_method_vs_method <- function(x, m1, m2, threshold){
     ) 
 }
 
+# Plot the number of enriched pathways (pathways with an associated FDR below
+# a threshold) of all PDCL for each method present in the data.frame collapsed.by.method.
 plot.count.pathways <- function(collapsed.by.method, threshold){
   data <- collapsed.by.method %>% filter(fdr<threshold)
   ggplot(
@@ -247,6 +272,9 @@ plot.count.pathways <- function(collapsed.by.method, threshold){
     scale_x_discrete(drop = F)
 }
 
+# Plot the number of enriched pathways (pathways with an associated FDR below
+# a threshold) of all PDCL for two methods specified by m1 and m2 args present in the 
+# data.frame collapsed.by.method. Highlight the pathways commons between the 2 methods.
 plot.count.pathways.m.vs.m <- function(collapsed.by.method, common.pathways, threshold, m1, m2){
   common.pathways <- common.pathways %>%
     filter(method_1 == m1, method_2 == m2)
@@ -278,6 +306,9 @@ plot.count.pathways.m.vs.m <- function(collapsed.by.method, common.pathways, thr
     scale_x_discrete(drop = F)
 }
 
+
+# Plot the number of enriched pathways (pathways with an associated FDR below
+# a threshold) of all categories for each method present in the data.frame collapsed.by.method.
 plot.count.categories <- function(collapsed.by.method, threshold){
   data <- collapsed.by.method %>% filter(fdr<threshold)
   ggplot(
@@ -301,6 +332,9 @@ plot.count.categories <- function(collapsed.by.method, threshold){
     scale_x_discrete(drop = F)
 }
 
+# Plot the number of enriched pathways (pathways with an associated FDR below
+# a threshold) of all categories for two methods specified by m1 and m2 args present in the 
+# data.frame collapsed.by.method. Highlight the pathways commons between the 2 methods.
 plot.count.categories.m.vs.m <- function(collapsed.by.method, common.pathways, threshold, m1, m2){
   common.pathways <- common.pathways %>%
     filter(method_1 == m1, method_2 == m2)
@@ -330,12 +364,15 @@ plot.count.categories.m.vs.m <- function(collapsed.by.method, common.pathways, t
     scale_x_discrete(drop = F)
 }
 
+# Generate a vector of breaks for ggplot graph with n values
+# inferior and superior a midpoint.
 generate.breaks <- function(min, max, midpoint, n){
   left <- seq(from = min, to = midpoint, length.out = n ) 
   right <- seq(from = midpoint, to = max, length.out = n )[-1]
   c(left, right)
 }
 
+# Turn the numeric FDR col into a factor with correct labels. 
 fdr.to.factor <- function(x, n){
   break.vect <- generate.breaks(0, 1, threshold, n)
   cut.vect <- cut(x$fdr, breaks = break.vect, labels = break.vect[-1])
@@ -344,6 +381,9 @@ fdr.to.factor <- function(x, n){
   x
 }
 
+# Heatmap of the FDR values for pathways common in at least one PDCL between the 2
+# method specified by m1 and m2 args. Common pathways have an FDR value below the
+# threshold specified.
 heatmap.pathways <- function(collapsed.by.method, common.pathways, threshold, m1, m2){
   common_col_name <- paste0("alpha_", threshold)
   common.pathways <- common.pathways %>%
@@ -405,6 +445,8 @@ heatmap.pathways <- function(collapsed.by.method, common.pathways, threshold, m1
   heatmap_plot
 }
 
+# Heatmap of the number of pathways found enriched in all categories.
+# Enriched pathways have a FDR value below the threshold specified  
 heatmap.categories <- function(collapsed.by.method, threshold){
   count <- collapsed.by.method %>% 
     filter(fdr < threshold) %>%
@@ -427,6 +469,7 @@ heatmap.categories <- function(collapsed.by.method, threshold){
     scale_y_discrete(limits=rev)
 }
 
+# Turn a list of rank for GSEA analysis into a data.frame object.
 collapse.rnk <- function(rnk){
   rnk <- imap_dfr(rnk, .f = function(rank,pdcl){
     data.frame(gene = names(rank), rank = rank, pdcl = pdcl, row.names = NULL)
@@ -435,6 +478,10 @@ collapse.rnk <- function(rnk){
   rnk
 }
 
+# Get the genes in the leadingEdge column from GEM result.
+# Return a data.frame where one line correspond to one gene
+# in a pathway for one PDCL. All informations from the original
+# data.frame are kept.
 get.genes.in.pathway <- function(collapsed.by.method){
   genes.in.common.pathways <- collapsed.by.method %>%
     mutate(genes = strsplit(genes, ",")) %>%
@@ -442,6 +489,14 @@ get.genes.in.pathway <- function(collapsed.by.method){
     dplyr::rename(gene = genes)
 }
 
+# Plot the genes present in the leadingEdge of enriched pathways
+# for one PDCL specified by the pdcl.name arg. Genes are ranked using
+# their abs(rank) value in decreasing order. Only the nb.max.gene first
+# genes are displayed in the plot.
+# The higher the abs(rank) is, the bigger the point in the plot.
+# Colour of the point indicate if the gene is up/down-regulated.
+# A warning is printed if there is no pathway below the threshold specified and
+# and a NULL value is returned by the function.
 plot.leading.edge <- function(rnk.collapsed, collapsed.by.method, pdcl.name, threshold, gsea.method.name = "GSEA", nb.max.genes=100, pathways = NULL){
   data <- get.genes.in.pathway(collapsed.by.method) %>% 
     filter(method == gsea.method.name, fdr < threshold, pdcl == pdcl.name)
@@ -490,6 +545,8 @@ plot.leading.edge <- function(rnk.collapsed, collapsed.by.method, pdcl.name, thr
   plot_leading_edge
 }
 
+# Same as the plot.leading.edge function, but only plot
+# genes found for pathways common between the method specified by m1 and m2.
 plot.common.pathway.leading.edge <- function(rnk.collapsed, collapsed.by.method, pdcl.name, threshold, all.common.pathways, m1="G:Profiler", m2="GSEA", gsea.method.name = m2, nb.max.genes=100){
   alpha_col <- paste0("alpha_", threshold)
   common_pathways <- all_common_pathways %>%
@@ -502,6 +559,8 @@ plot.common.pathway.leading.edge <- function(rnk.collapsed, collapsed.by.method,
   plot.leading.edge(rnk.collapsed, collapsed.by.method, pdcl.name, threshold, gsea.method.name, nb.max.genes, common_pathways)
 }
 
+# Volcano plot to compare the deregulation type (up or down)
+# between DESeq2 and PENDA 
 plot.volcano <- function(data){
   ggplot(
     data, 
@@ -517,6 +576,9 @@ plot.volcano <- function(data){
     )
 }
 
+# Create a data.frame to compare the deregulation type (up or down)
+# between DESeq2 and PENDA for the PDCL specified in args.
+# Call the plot.volcano method to create the plot.
 volcano.deseq2.vs.penda <- function(deseq2_res_list, penda_res, pdcl){
   data <- merge(as.data.frame(deseq2_res_list[[pdcl]]), penda_res, by="row.names")
   data <- data %>% select(log2FoldChange, padj, all_of(pdcl)) %>%
@@ -527,6 +589,9 @@ volcano.deseq2.vs.penda <- function(deseq2_res_list, penda_res, pdcl){
   plot.volcano(data) + labs(title = plot_title )
 }
 
+# Create a data.frame to compare the deregulation type (up or down)
+# between DESeq2 and PENDA for ALL PDCL.
+# Call the plot.volcano method to create the plot.
 volcano.deseq2.vs.penda.all <- function(deseq2_res_list, penda_res, pdcl_names){
   df <- map_dfr(pdcl_names, function(pdcl){
     data <- merge(as.data.frame(deseq2_res_list[[pdcl]]), penda_res, by="row.names")
