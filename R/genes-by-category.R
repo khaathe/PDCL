@@ -3,7 +3,7 @@ source("~/PhD/PDCL/R/gprofiler-analysis.R")
 source("~/PhD/PDCL/R/plot-result.R")
 
 all_pathways <- gmtPathways("Data/gene-set/jorge-gmt/reactome_gmt_symbol.gmt")
-all_pathway_names <- names(reactome)
+all_pathway_names <- names(all_pathways)
 
 categories_re <- c(
   "^\\bAutophagy\\b$",
