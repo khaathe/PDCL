@@ -3,10 +3,11 @@ Result*/
 *_files/
 *_cache/
 Code_Magali/
-V1/
 
-.Rhistory
-
+*.zip
+*.png
+*.RData
+*.Rhistory
 *.pdf
 *.html
 *.rds
