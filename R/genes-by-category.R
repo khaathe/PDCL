@@ -32,6 +32,7 @@ categories <- all_pathways[match_index]
 
 lapply(categories, function(x){ length(x) })
 
+penda_genes <- row.names(penda_res)
 pdcl_dereg_genes <- imap_dfr(penda_res, function(x, y){
   dereg_index <- which(x != 0)
   data.frame(gene = penda_genes[dereg_index], dereg = x[dereg_index], pdcl = y)
