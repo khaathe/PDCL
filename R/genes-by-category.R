@@ -44,6 +44,12 @@ category_genes <- imap_dfr(categories, function(x, y){
 pdcl_dereg_categories <- pdcl_dereg_genes %>% inner_join(category_genes, by = "gene")
 table_pdcl_dereg_categories <- table( select(pdcl_dereg_categories, category, pdcl) )
 
+super_deregulated_genes <- pdcl_dereg_genes %>%
+  count(gene, dereg) %>%
+  filter(n==length(pdcl_names)) %>%
+  arrange(gene)
+table(super_deregulated_genes$dereg)
+
 list_table_dereg_per_pdcl <- lapply(pdcl_names, function(x){
   addmargins(
     table( pdcl_dereg_categories %>% filter(pdcl == x) %>% select(category, dereg))
@@ -64,7 +70,7 @@ plot_list <- imap(pdcl_rank_per_category, function(x, y){
     )
 })
 
-pdcl_rank_per_category <- lapply(pdcl_rank_per_category, function(x){
+summary_pdcl_rank_per_category <- lapply(pdcl_rank_per_category, function(x){
   x %>% 
     group_by(category) %>%
     summarise(
