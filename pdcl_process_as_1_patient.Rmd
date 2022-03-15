@@ -99,12 +99,48 @@ pdcl_names <- c(
 ## Load PENDA results
 
 ```{r load-penda}
-penda_res_file <- "Data/PDCL/results_combine.csv"
-penda_res <- read.table(penda_res_file, sep = ";", header = T, row.names = 1, check.names = F)
+penda_res <- readRDS("Data/PDCL/results_penda_astrocytes_2021.rds")
+penda_res <- as.data.frame(penda_res)
 penda_pdcl_names <- names(penda_res)
 # Remove ".genes.results" string in the column names
 penda_pdcl_names <- sub(".genes.results", "", penda_pdcl_names, ignore.case = T)
 names(penda_res) <- penda_pdcl_names
+```
+
+## Load GSEA GMTs
+
+Load GMT files for GSEA pathway enrichment.
+
+```{r create-gsea-gmt-list}
+reactome_gmt_file <- gmtPathways(
+  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
+)
+gsea_gmt_list <- list(reactome = reactome_gmt_file)
+```
+
+## Load G:Profiler GMTs
+
+Upload GMT File before running G:Profiler Enrichment Analysis if needed.
+
+Otherwise juste define the token of the GMT stored on G:Profiler website.
+
+```{r upload-gmt-gprofiler}
+# This portion is commented because the file are already uploaded
+# reactome_gmt_token <- upload_GMT_file(gmtfile = 
+#  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
+# )
+# bioplanet_gmt_token <- upload_GMT_file(gmtfile = 
+#  "Data/gene-set/jorge-gmt/bioplanet_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
+# )
+
+reactome_gmt_token <- "gp__Nqmx_yxm7_37U"
+bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
+```
+
+Create a list of GMT files.
+
+```{r create-gprofiler-gmt-list}
+gprofiler_gmt_list <- list(reactome = reactome_gmt_token)
 ```
 
 # Differential Analysis with DESeq2
@@ -173,20 +209,9 @@ ggplot(
   )
 ```
 
-# GSEA Pathway Enrichment
+# Pathways Enrichment
 
-## Load Gene Matrix Files (=GMT)
-
-Load GMT files for GSEA pathway enrichment.
-
-```{r create-gsea-gmt-list}
-reactome_gmt_file <- gmtPathways(
-  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
-)
-gsea_gmt_list <- list(reactome = reactome_gmt_file)
-```
-
-## Run GSEA
+## GSEA Pathway Enrichment
 
 Here we run a GSEA pathway enrichment analysis with the log2FoldChange calculated by DESeq2 as the scoring metrics in the ranked list submited to GSEA.
 
@@ -215,32 +240,9 @@ gsea_gem <- lapply(gsea_res_list, convert.gsea.to.gem)
 save.gem.list.to.txt(gsea_gem, paste0(result_dir, "gsea/deseq2/"), "deseq2")
 ```
 
-# GProfiler Pathway Enrichment
+## GProfiler Pathway Enrichment
 
-Upload GMT File before running G:Profiler Enrichment Analysis if needed.
-
-Otherwise juste define the token of the GMT stored on G:Profiler website.
-
-```{r upload-gmt-gprofiler}
-# This portion is commented because the file are already uploaded
-# reactome_gmt_token <- upload_GMT_file(gmtfile = 
-#  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
-# )
-# bioplanet_gmt_token <- upload_GMT_file(gmtfile = 
-#  "Data/gene-set/jorge-gmt/bioplanet_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
-# )
-
-reactome_gmt_token <- "gp__Nqmx_yxm7_37U"
-bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
-```
-
-Create a list of GMT files.
-
-```{r create-gprofiler-gmt-list}
-gprofiler_gmt_list <- list(reactome = reactome_gmt_token)
-```
-
-Run G:Profiler for PENDA result
+Run G:Profiler
 
 ```{r run-gprofiler, cache=TRUE}
 all_pdcl_genes <- row.names(deseq2_res)
@@ -263,16 +265,15 @@ gost_gem <- lapply(gost_res_list, convert.gost.to.gem)
 save.gem.list.to.txt(gost_gem, paste0(result_dir, "gprofiler/deseq2/"), "deseq2")
 ```
 
-# Process Result
+## Process Result
 
-
-## Define GEM list
+### Define GEM list
 
 ```{r define-gem-list}
 gem_list <- list("G:Profiler" = gost_gem, "GSEA" = gsea_gem)
 ```
 
-## Collapse by method
+### Collapse by method
 
 ```{r collapse-by-method}
 # Collapse the results by method.
@@ -280,13 +281,13 @@ gem_list <- list("G:Profiler" = gost_gem, "GSEA" = gsea_gem)
 gem_collapsed <- collapse.gem.list(gem_list)
 ```
 
-## Collapse by pathways
+### Collapse by pathways
 
 ```{r collapse-by-pathways}
 gem_collapsed_method_vs_method <- collapse.method.vs.method(gem_collapsed)
 ```
 
-## Find common pathways
+### Find common pathways
 
 ```{r find-common-pathways}
 all_common_pathways <- find.method.common.pathways(gem_collapsed_method_vs_method, c(0.05, 0.1))
@@ -294,7 +295,7 @@ gem_collapsed_method_vs_method <- gem_collapsed_method_vs_method %>%
   inner_join(all_common_pathways, by=c("pathway_id", "pdcl", "method_1", "method_2"))
 ```
 
-# Plot 
+## Plot 
 
 ```{r set-alpha, include=FALSE}
 threshold <- 0.1
@@ -303,15 +304,7 @@ count_dir <- paste0(result_dir, "plot/alpha_0.05/count/")
 heatmap_dir <- paste0(result_dir, "plot/alpha_0.05/heatmap/")
 ```
 
-## Enriched Pathways
-
-```{r enriched-pathways}
-gem_collapsed %>%
-  filter(fdr<threshold) %>%
-  count(method)
-```
-
-## Plot count categories 
+### Plot count categories 
 
 ```{r count-categories-10-percent}
 count_categories_0.1 <- plot.count.categories(gem_collapsed, threshold)
@@ -319,6 +312,126 @@ tmp_filename <- paste0(count_dir, "plot_count_categories_0.1.png")
 ggsave(tmp_filename, plot = count_categories_0.1, width = 10, height = 7)
 count_categories_0.1
 ```
+
+# Pathway Enrichment for Super Deregulated Genes
+
+## Analyze Deregulated genes
+Number of genes per categories in GMT File :
+```{r select-categories, echo=FALSE}
+all_pathways <- gmtPathways("Data/gene-set/jorge-gmt/reactome_gmt_symbol.gmt")
+all_pathway_names <- names(all_pathways)
+
+categories_re <- c(
+  "^\\bAutophagy\\b$",
+  "^\\bCell Cycle\\b$",
+  "^\\bCell-Cell communication\\b$",
+  "^\\bCellular responses to external stimuli\\b$",
+  "^\\bChromatin organization\\b$",
+  "^\\bCircadian Clock\\b$",
+  "^\\bDNA Repair\\b$",
+  "^\\bDNA Replication\\b$",
+  "^\\bExtracellular matrix organization\\b$",
+  "^\\bGene expression",
+  "^\\bMetabolism\\b$",
+  "^\\bMetabolism of proteins\\b$",
+  "^\\bMetabolism of RNA\\b$",
+  "^\\bOrganelle biogenesis and maintenance\\b$",
+  "^\\bProgrammed Cell Death\\b$",
+  "^\\bProtein localization\\b$",
+  "^\\bVesicle-mediated transport\\b$",
+  "^\\bSignal Transduction\\b$"
+)
+
+pattern <- paste0(categories_re, collapse = "|")
+match_index <- grepl(pattern, all_pathway_names, ignore.case = T, perl = T)
+categories <- all_pathways[match_index]
+lapply(categories, function(x){ length(x) })
+```
+
+```{r table-pdcl-categories , echo=FALSE}
+penda_genes <- row.names(penda_res)
+pdcl_dereg_genes <- imap_dfr(penda_res, function(x, y){
+  dereg_index <- which(x != 0)
+  data.frame(gene = penda_genes[dereg_index], dereg = x[dereg_index], pdcl = y)
+})
+
+category_genes <- imap_dfr(categories, function(x, y){
+  data.frame(category = y, gene = x)
+})
+
+pdcl_dereg_categories <- pdcl_dereg_genes %>% inner_join(category_genes, by = "gene")
+table_pdcl_dereg_categories <- table( select(pdcl_dereg_categories, category, pdcl) )
+table_pdcl_dereg_categories
+```
+
+## Find Super Deregulated genes
+Number of super-deregulated genes (deregulated accross all the PDCL):
+
+```{r super-deregulated-genes, echo=FALSE}
+super_deregulated_genes <- pdcl_dereg_genes %>%
+  count(gene, dereg) %>%
+  filter(n==length(pdcl_names)) %>%
+  arrange(gene) %>% 
+  select(gene, dereg)
+
+table(super_deregulated_genes$dereg)
+
+#TODO : volcano plot of super deregulated genes
+```
+
+## GSEA Pathway Enrichment
+
+Here we run a GSEA pathway enrichment analysis with the log2FoldChange calculated by DESeq2 as the scoring metrics in the ranked list submited to GSEA.
+
+*Message from Jorge :*
+
+We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
+
+```{r run-gsea-sd, cache=TRUE}
+set.seed(1)
+# Create the ranked list for GSEA
+keep <- super_deregulated_genes$gene[super_deregulated_genes$gene %in% row.names(deseq2_res)]
+
+rnk_tmp <- as.data.frame(deseq2_res[keep,]) %>%
+  mutate(rank = log2FoldChange*-log10(padj)) %>%
+  arrange(desc(rank))
+rnk <- rnk_tmp %>% pull(rank)
+names(rnk) <- row.names(rnk_tmp)
+rnk <- rnk[is.finite(rnk)]
+rank_sd_list <- list("super_deregulated" = rnk)
+
+# Run GSEA analysis for each ranked list for both Reactom and Bioplanet
+gsea_res_sd_list <- lapply(rank_sd_list, run.gsea, gsea_gmt_list)
+saveRDS(gsea_res_sd_list, file = paste0(result_dir, "gsea_sd_ pathway_enrichment.rds"))
+
+gsea_sd_gem <- lapply(gsea_res_sd_list, convert.gsea.to.gem)
+save.gem.list.to.txt(gsea_sd_gem, paste0(result_dir, "gsea_sd/deseq2/"), "deseq2")
+```
+
+## GProfiler Pathway Enrichment
+
+Run G:Profiler
+
+```{r run-gprofiler-sd, cache=TRUE}
+all_pdcl_genes <- row.names(deseq2_res)
+all_sd_gene_list <- list("superderegulated" = deregulated_genes)
+gost_sd_res_list <- lapply(all_sd_gene_list, function(gene_list){
+  res <- run.gost(
+    gene_list,
+    all_pdcl_genes,
+    gprofiler_gmt_list
+  )
+  return(res)
+})
+
+saveRDS(gost_sd_res_list, file = paste0(result_dir, "gprofiler_sd_pathway_enrichment.rds"))
+gost_sd_gem <- lapply(gost_sd_res_list, convert.gost.to.gem)
+save.gem.list.to.txt(gost_sd_gem, paste0(result_dir, "gprofiler_sd/deseq2/"), "deseq2")
+```
+
+## Plot
+
+TODO : Make plots
 
 ```{r save-session, include=FALSE}
 save.image("~/PhD/PDCL/pdcl_process_as_1_patient.RData")
