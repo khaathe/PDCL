@@ -122,6 +122,7 @@ method_vs_method <- function(collapsed_by_method, m1_name, m2_name){
 # - method : the enrichment method that has generated this result (ex: GSEA, G:Profiler) 
 collapse.gem.list <- function(gem_list){
   collapsed_by_method <- gem_list
+  
   collapsed_by_method <-  map_depth(.x = collapsed_by_method, .depth = 2, .f = function(x){
     map.list.to.df(x, "db")
   })
@@ -131,6 +132,11 @@ collapse.gem.list <- function(gem_list){
   })
   
   collapsed_by_method <-  map_depth(.x = collapsed_by_method, .depth = 0, .f = function(x){
+    imap(collapsed_by_method, function(x,y){
+      if( all(isEmpty(x))){
+        stop(y, " result is empty.")
+      }
+    })
     map.list.to.df(x, "method")
   })
   
