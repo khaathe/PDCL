@@ -163,11 +163,15 @@ condition_vect <- c(
   rep("control", length(control_names)), 
   rep("pdcl", length(pdcl_names))
 )
+sample <- gsub("^(.*)_(Br\\d.*)", "\\1", colnames(count_data), ignore.case = T, perl = T, fixed = F)
+# sample[(length(control_names)+1):length(sample)] <- "gbm"
+replicate <- gsub("^(.*)_(Br\\d.*)", "\\2", colnames(count_data), ignore.case = T, perl = T, fixed = F)
 count_metadata <- data.frame(
-  sample = c(control_names, pdcl_names), 
-  condition=condition_vect
+  sample = as.factor(sample),
+  replicate = as.factor(replicate),
+  condition = as.factor(condition_vect),
+  row.names = colnames(count_data)
 )
-count_metadata$condition <- as.factor(count_metadata$condition)
 ```
 
 ## Perform Differential Analysis
@@ -197,8 +201,9 @@ summary(deseq2_res)
 ## VolcanoPlot Differential Analysis Results
 
 ```{r volcano-plot-deseq2, echo=FALSE}
+deseq2_res_df <- as.data.frame(deseq2_res)
 ggplot(
-  as.data.frame(deseq2_res), 
+  deseq2_res_df, 
   aes(x = log2FoldChange, y = -log10(padj), colour = (padj<alpha) )
 ) + 
   geom_point() +
@@ -207,6 +212,39 @@ ggplot(
     title = "Volcano Plot DESeq2 Results",
     colour = NULL
   )
+```
+
+## Compare DESeq2_log2FC with manually computed log2FC
+
+```{r compare-lfc}
+pdcl_mean_expr <- rowMeans(pdcl_count_table[,-1])
+names(pdcl_mean_expr) <- pdcl_count_table$gene_id
+control_mean_expr <- rowMeans(control[,c(-1,-2)])
+names(control_mean_expr) <- control$symbol
+pdcl_genes <- pdcl_count_table$gene_id[ pdcl_count_table$gene_id %in% control$symbol]
+pdcl_mean_expr <- pdcl_mean_expr[pdcl_genes]
+control_mean_expr <- control_mean_expr[pdcl_genes]
+log2FC <- log2(pdcl_mean_expr/control_mean_expr)
+names(log2FC) <- pdcl_genes
+
+deseq2_FC <- deseq2_res$log2FoldChange
+names(deseq2_FC) <- row.names(deseq2_res)
+deseq2_FC <- deseq2_FC[pdcl_genes]
+
+data <- data.frame(log2FC = log2FC, deseq2_FC = deseq2_FC)
+data <- data %>% filter(!is.infinite(log2FC), !is.nan(log2FC), !is.infinite(deseq2_FC), !is.nan(deseq2_FC) )
+fit <- lm(formula = deseq2_FC ~ log2FC, data = data)
+
+p_comparison_log2fc <- ggplot(
+  data,
+  aes(x = log2FC, y = deseq2_FC)
+) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  geom_abline(slope = fit$coefficients[2], intercept = fit$coefficients[1], color = "blue") +
+  labs(title = "Comparison log2FoldChange", x = "log2FC manually computed", y = "log2FC computed by DESeq2")
+
+ggplotly(p_comparison_log2fc)
 ```
 
 # Pathways Enrichment
@@ -293,6 +331,7 @@ gem_collapsed_method_vs_method <- collapse.method.vs.method(gem_collapsed)
 all_common_pathways <- find.method.common.pathways(gem_collapsed_method_vs_method, c(0.05, 0.1))
 gem_collapsed_method_vs_method <- gem_collapsed_method_vs_method %>%
   inner_join(all_common_pathways, by=c("pathway_id", "pdcl", "method_1", "method_2"))
+all_common_pathways %>% dplyr::count(alpha_0.1)
 ```
 
 ## Plot 
@@ -316,7 +355,7 @@ count_categories_0.1
 # Pathway Enrichment for Super Deregulated Genes
 
 ## Analyze Deregulated genes
-Number of genes per categories in GMT File :
+
 ```{r select-categories, echo=FALSE}
 all_pathways <- gmtPathways("Data/gene-set/jorge-gmt/reactome_gmt_symbol.gmt")
 all_pathway_names <- names(all_pathways)
@@ -345,8 +384,11 @@ categories_re <- c(
 pattern <- paste0(categories_re, collapse = "|")
 match_index <- grepl(pattern, all_pathway_names, ignore.case = T, perl = T)
 categories <- all_pathways[match_index]
-lapply(categories, function(x){ length(x) })
+# To see the number of genes present in the GMT file
+# lapply(categories, function(x){ length(x) })
 ```
+
+Number of deregulated genes per categories :
 
 ```{r table-pdcl-categories , echo=FALSE}
 penda_genes <- row.names(penda_res)
@@ -361,7 +403,17 @@ category_genes <- imap_dfr(categories, function(x, y){
 
 pdcl_dereg_categories <- pdcl_dereg_genes %>% inner_join(category_genes, by = "gene")
 table_pdcl_dereg_categories <- table( select(pdcl_dereg_categories, category, pdcl) )
-table_pdcl_dereg_categories
+table_pdcl_dereg_categories <- as.data.frame(table_pdcl_dereg_categories)
+
+h_dereg_categ <- ggplot(
+  table_pdcl_dereg_categories,
+  aes(pdcl, category, fill = Freq)
+) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  theme(axis.text.x = element_text(angle = 90))
+
+ggplotly(h_dereg_categ)
 ```
 
 ## Find Super Deregulated genes
@@ -375,8 +427,25 @@ super_deregulated_genes <- pdcl_dereg_genes %>%
   select(gene, dereg)
 
 table(super_deregulated_genes$dereg)
+```
 
-#TODO : volcano plot of super deregulated genes
+```{r plot-sd-genes-lfc}
+deseq2_res_df$sd_dereg <- 0
+deseq2_res_df$sd_dereg[super_deregulated_genes$gene] <- super_deregulated_genes$dereg
+deseq2_res_df$sd_dereg <- as.factor(deseq2_res_df$sd_dereg)
+data <- deseq2_res_df %>% filter(sd_dereg != "0")
+volcano_sd_genes_lfc <- ggplot(
+  data,
+  aes(x = log2FoldChange, y = -log10(padj), colour = sd_dereg, alpha = 0.6)
+) + 
+  geom_point() +
+  scale_color_manual(values = c("1" = "red", "-1" = "blue"), labels = c("Super Up", "Super Down")) +
+  labs(
+    title = "Volcano Plot DESeq2 Results",
+    colour = NULL
+  )
+
+volcano_sd_genes_lfc
 ```
 
 ## GSEA Pathway Enrichment
@@ -429,9 +498,30 @@ gost_sd_gem <- lapply(gost_sd_res_list, convert.gost.to.gem)
 save.gem.list.to.txt(gost_sd_gem, paste0(result_dir, "gprofiler_sd/deseq2/"), "deseq2")
 ```
 
+## Process Result
+
+### Define GEM list
+
+GSEA gives no result for pathway enrichment on SuperDeregulated genes. Hence we
+do not add it to the gem list to study.
+```{r define-sd-gem-list}
+gem_sd_list <- list("G:Profiler" = gost_sd_gem)
+```
+
+### Collapse by method
+
+```{r collapse-sd-by-method}
+# Collapse the results by method.
+# One line contain the result of one enrichment method for one pathway of one PDCL
+gem_sd_collapsed <- collapse.gem.list(gem_sd_list)
+```
+
 ## Plot
 
-TODO : Make plots
+```{r num enriched-pathways-per-method}
+heatmap.categories(gem_sd_collapsed, 0.1)
+```
+
 
 ```{r save-session, include=FALSE}
 save.image("~/PhD/PDCL/pdcl_process_as_1_patient.RData")
