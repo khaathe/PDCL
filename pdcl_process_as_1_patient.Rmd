@@ -214,6 +214,41 @@ ggplot(
   )
 ```
 
+## Volcano Plot Super Deregulated genes
+Number of super-deregulated genes (deregulated accross all the PDCL):
+
+```{r super-deregulated-genes, echo=FALSE}
+sd_dereg_genes <- pdcl_dereg_genes %>%
+  count(gene, dereg) %>%
+  filter(n==length(pdcl_names)) %>%
+  arrange(gene) %>% 
+  select(gene, dereg)
+
+table(sd_dereg_genes$dereg)
+```
+
+```{r plot-sd-genes-lfc}
+deseq2_res_df$sd_dereg <- 0
+sd_index <- which(row.names(deseq2_res_df) %in% sd_dereg_genes$gene)
+keep <- row.names(deseq2_res_df)[sd_index]
+deseq2_res_df$sd_dereg[sd_index] <- sd_dereg_genes$dereg[sd_dereg_genes$gene %in% keep]
+deseq2_res_df$sd_dereg <- as.factor(deseq2_res_df$sd_dereg)
+data <- deseq2_res_df # %>% filter(sd_dereg != "0")
+data$gene <- row.names(data)
+volcano_sd_genes_lfc <- ggplot(
+  data,
+  aes(x = log2FoldChange, y = -log10(padj), colour = sd_dereg, alpha = 0.6, label = gene)
+) + 
+  geom_point() +
+  scale_color_manual(values = c("1" = "red", "-1" = "blue"), labels = c("Super Up", "Super Down")) +
+  labs(
+    title = "Volcano Plot DESeq2 Results",
+    colour = NULL
+  )
+
+volcano_sd_genes_lfc
+```
+
 ## Compare DESeq2_log2FC with manually computed log2FC
 
 ```{r compare-lfc}
@@ -351,175 +386,6 @@ tmp_filename <- paste0(count_dir, "plot_count_categories_0.1.png")
 ggsave(tmp_filename, plot = count_categories_0.1, width = 10, height = 7)
 count_categories_0.1
 ```
-
-# Pathway Enrichment for Super Deregulated Genes
-
-## Analyze Deregulated genes
-
-```{r select-categories, echo=FALSE}
-all_pathways <- gmtPathways("Data/gene-set/jorge-gmt/reactome_gmt_symbol.gmt")
-all_pathway_names <- names(all_pathways)
-
-categories_re <- c(
-  "^\\bAutophagy\\b$",
-  "^\\bCell Cycle\\b$",
-  "^\\bCell-Cell communication\\b$",
-  "^\\bCellular responses to external stimuli\\b$",
-  "^\\bChromatin organization\\b$",
-  "^\\bCircadian Clock\\b$",
-  "^\\bDNA Repair\\b$",
-  "^\\bDNA Replication\\b$",
-  "^\\bExtracellular matrix organization\\b$",
-  "^\\bGene expression",
-  "^\\bMetabolism\\b$",
-  "^\\bMetabolism of proteins\\b$",
-  "^\\bMetabolism of RNA\\b$",
-  "^\\bOrganelle biogenesis and maintenance\\b$",
-  "^\\bProgrammed Cell Death\\b$",
-  "^\\bProtein localization\\b$",
-  "^\\bVesicle-mediated transport\\b$",
-  "^\\bSignal Transduction\\b$"
-)
-
-pattern <- paste0(categories_re, collapse = "|")
-match_index <- grepl(pattern, all_pathway_names, ignore.case = T, perl = T)
-categories <- all_pathways[match_index]
-# To see the number of genes present in the GMT file
-# lapply(categories, function(x){ length(x) })
-```
-
-Number of deregulated genes per categories :
-
-```{r table-pdcl-categories , echo=FALSE}
-penda_genes <- row.names(penda_res)
-pdcl_dereg_genes <- imap_dfr(penda_res, function(x, y){
-  dereg_index <- which(x != 0)
-  data.frame(gene = penda_genes[dereg_index], dereg = x[dereg_index], pdcl = y)
-})
-
-category_genes <- imap_dfr(categories, function(x, y){
-  data.frame(category = y, gene = x)
-})
-
-pdcl_dereg_categories <- pdcl_dereg_genes %>% inner_join(category_genes, by = "gene")
-table_pdcl_dereg_categories <- table( select(pdcl_dereg_categories, category, pdcl) )
-table_pdcl_dereg_categories <- as.data.frame(table_pdcl_dereg_categories)
-
-h_dereg_categ <- ggplot(
-  table_pdcl_dereg_categories,
-  aes(pdcl, category, fill = Freq)
-) +
-  geom_tile() +
-  scale_fill_viridis_c() +
-  theme(axis.text.x = element_text(angle = 90))
-
-ggplotly(h_dereg_categ)
-```
-
-## Find Super Deregulated genes
-Number of super-deregulated genes (deregulated accross all the PDCL):
-
-```{r super-deregulated-genes, echo=FALSE}
-super_deregulated_genes <- pdcl_dereg_genes %>%
-  count(gene, dereg) %>%
-  filter(n==length(pdcl_names)) %>%
-  arrange(gene) %>% 
-  select(gene, dereg)
-
-table(super_deregulated_genes$dereg)
-```
-
-```{r plot-sd-genes-lfc}
-deseq2_res_df$sd_dereg <- 0
-sd_index <- which(row.names(deseq2_res_df) %in% super_deregulated_genes$gene)
-keep <- row.names(deseq2_res_df)[sd_index]
-deseq2_res_df$sd_dereg[sd_index] <- super_deregulated_genes$dereg[super_deregulated_genes$gene %in% keep]
-deseq2_res_df$sd_dereg <- as.factor(deseq2_res_df$sd_dereg)
-data <- deseq2_res_df # %>% filter(sd_dereg != "0")
-data$gene <- row.names(data)
-volcano_sd_genes_lfc <- ggplot(
-  data,
-  aes(x = log2FoldChange, y = -log10(padj), colour = sd_dereg, alpha = 0.6, label = gene)
-) + 
-  geom_point() +
-  scale_color_manual(values = c("1" = "red", "-1" = "blue"), labels = c("Super Up", "Super Down")) +
-  labs(
-    title = "Volcano Plot DESeq2 Results",
-    colour = NULL
-  )
-
-volcano_sd_genes_lfc
-```
-
-## GSEA Pathway Enrichment
-
-Here we run a GSEA pathway enrichment analysis with the log2FoldChange calculated by DESeq2 as the scoring metrics in the ranked list submited to GSEA.
-
-*Message from Jorge :*
-
-We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
-
-```{r run-gsea-sd, cache=TRUE}
-set.seed(1)
-# Create the ranked list for GSEA
-keep <- super_deregulated_genes$gene[super_deregulated_genes$gene %in% row.names(deseq2_res)]
-
-rnk_tmp <- as.data.frame(deseq2_res[keep,]) %>%
-  mutate(rank = log2FoldChange*-log10(padj)) %>%
-  arrange(desc(rank))
-rnk <- rnk_tmp %>% pull(rank)
-names(rnk) <- row.names(rnk_tmp)
-rnk <- rnk[is.finite(rnk)]
-rank_sd_list <- list("super_deregulated" = rnk)
-
-# Run GSEA analysis for each ranked list for both Reactom and Bioplanet
-gsea_res_sd_list <- lapply(rank_sd_list, run.gsea, gsea_gmt_list)
-saveRDS(gsea_res_sd_list, file = paste0(result_dir, "gsea_sd_ pathway_enrichment.rds"))
-
-gsea_sd_gem <- lapply(gsea_res_sd_list, convert.gsea.to.gem)
-save.gem.list.to.txt(gsea_sd_gem, paste0(result_dir, "gsea_sd/deseq2/"), "deseq2")
-```
-
-## GProfiler Pathway Enrichment
-
-Run G:Profiler
-
-```{r run-gprofiler-sd, cache=TRUE}
-all_pdcl_genes <- row.names(deseq2_res)
-all_sd_gene_list <- list("superderegulated" = deregulated_genes)
-gost_sd_res_list <- lapply(all_sd_gene_list, function(gene_list){
-  res <- run.gost(
-    gene_list,
-    all_pdcl_genes,
-    gprofiler_gmt_list
-  )
-  return(res)
-})
-
-saveRDS(gost_sd_res_list, file = paste0(result_dir, "gprofiler_sd_pathway_enrichment.rds"))
-gost_sd_gem <- lapply(gost_sd_res_list, convert.gost.to.gem)
-save.gem.list.to.txt(gost_sd_gem, paste0(result_dir, "gprofiler_sd/deseq2/"), "deseq2")
-```
-
-## Process Result
-
-### Define GEM list
-
-GSEA gives no result for pathway enrichment on SuperDeregulated genes. Hence we
-do not add it to the gem list to study.
-```{r define-sd-gem-list}
-gem_sd_list <- list("G:Profiler" = gost_sd_gem)
-```
-
-### Collapse by method
-
-```{r collapse-sd-by-method}
-# Collapse the results by method.
-# One line contain the result of one enrichment method for one pathway of one PDCL
-gem_sd_collapsed <- collapse.gem.list(gem_sd_list)
-```
-
-## Plot
 
 ```{r save-session, include=FALSE}
 save.image("~/PhD/PDCL/pdcl_process_as_1_patient.RData")
