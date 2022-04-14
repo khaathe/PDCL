@@ -431,12 +431,15 @@ table(super_deregulated_genes$dereg)
 
 ```{r plot-sd-genes-lfc}
 deseq2_res_df$sd_dereg <- 0
-deseq2_res_df$sd_dereg[super_deregulated_genes$gene] <- super_deregulated_genes$dereg
+sd_index <- which(row.names(deseq2_res_df) %in% super_deregulated_genes$gene)
+keep <- row.names(deseq2_res_df)[sd_index]
+deseq2_res_df$sd_dereg[sd_index] <- super_deregulated_genes$dereg[super_deregulated_genes$gene %in% keep]
 deseq2_res_df$sd_dereg <- as.factor(deseq2_res_df$sd_dereg)
-data <- deseq2_res_df %>% filter(sd_dereg != "0")
+data <- deseq2_res_df # %>% filter(sd_dereg != "0")
+data$gene <- row.names(data)
 volcano_sd_genes_lfc <- ggplot(
   data,
-  aes(x = log2FoldChange, y = -log10(padj), colour = sd_dereg, alpha = 0.6)
+  aes(x = log2FoldChange, y = -log10(padj), colour = sd_dereg, alpha = 0.6, label = gene)
 ) + 
   geom_point() +
   scale_color_manual(values = c("1" = "red", "-1" = "blue"), labels = c("Super Up", "Super Down")) +
@@ -517,11 +520,6 @@ gem_sd_collapsed <- collapse.gem.list(gem_sd_list)
 ```
 
 ## Plot
-
-```{r num enriched-pathways-per-method}
-heatmap.categories(gem_sd_collapsed, 0.1)
-```
-
 
 ```{r save-session, include=FALSE}
 save.image("~/PhD/PDCL/pdcl_process_as_1_patient.RData")
