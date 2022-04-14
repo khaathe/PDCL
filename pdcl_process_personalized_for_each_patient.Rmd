@@ -24,9 +24,9 @@ library(dplyr)
 library(purrr)
 
 # Source files with functions used in next steps
-source("R/gprofiler-analysis.R")
-source("R/gsea-analysis.R")
-source("R/plot-result.R")
+source("R/pdcl_process_personalized_for_each_patient/gprofiler-analysis.R")
+source("R/pdcl_process_personalized_for_each_patient/gsea-analysis.R")
+source("R/pdcl_process_personalized_for_each_patient/plot-result.R")
 ```
 
 # Load Data
