@@ -1,5 +1,9 @@
 #!/usr/bin/python3 
 
+# Use this script to download the gene from the Kegg database.
+# To filter out small and large pathways (nb of genes <15 or >1000)
+# Use the awk program with a command such as :
+# awk -F "\t" '{if(NF-2 > 15 || NF-2<1000) print}' kegg.gmt > kegg_no_less_15_no_more_1000.gmt 
 import requests
 import warnings
 import re
