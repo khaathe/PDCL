@@ -5,10 +5,7 @@
 
 import os
 import sys
-import time
-from cvxpy import length
 import requests
-import warnings
 import re
 
 # Path to kegg2go file to write
@@ -35,31 +32,29 @@ def get_list_human_pathways():
         human_pathways[pathway_id] = pathway_desc
     return(human_pathways)
     
-# Map each kegg pathways to a list
-# of GO Term ID
-def link_kegg_2_go(pathways):
-    # TODO: Test
-    kegg2go = dict()
-    for path_id in progress_bar(pathways.keys()):
-        currentState = "START"
-        response = kegg_get("get", [path_id])
-        for line in response.text.strip().splitlines():
-            m = re.search("^(\w+)", line, flags=re.IGNORECASE)
-            if (m != None) : currentState = m.group(1)
-            if (currentState.upper() == "DBLINKS") :
-                m = re.search("GO:\s*([\d\s]*)", line)
-                if (m != None):
-                    go_ids = m.group(1).split()
-                    kegg2go[path_id] = go_ids
-    return(kegg2go)
+# Return GO ID corresponding to Kegg ID
+def get_kegg_2_go(path_id):
+    go_ids = list()
+    currentState = "START"
+    response = kegg_get("get", [path_id])
+    for line in response.text.strip().splitlines():
+        m = re.search("^(\w+)", line, flags=re.IGNORECASE)
+        if (m != None) : currentState = m.group(1)
+        if (currentState.upper() == "DBLINKS") :
+            m = re.search("GO:\s*([\d\s]*)", line)
+            if (m != None):
+                go_ids.extend(m.group(1).split())
+    return(go_ids)
 
 # Write the kegg2go file at the specified path
-def write_kegg2go():
-    # TODO: implement
-    # with open(gmt_path, "w") as out:
-    #     for k, v in pathway_2_genes.items():
-    #         out.write("{}\t{}\t{}\n".format(k, pathways[k], '\t'.join(v) ))
-    pass
+def write_kegg2go(pathways, source_db = "KEGG", sep="\t"):
+    with open(kegg2go_path, "w") as out:
+        header = sep.join(["source_db", "source_id", "source_desc", "go_id", "go_desc"]).strip() + os.linesep
+        out.write(header)
+        for (path_id, path_desc) in progress_bar( pathways.items() ):
+            for go_id in get_kegg_2_go(path_id):
+                str = sep.join([source_db, path_id, path_desc, f'GO:{go_id}', "NA"]).strip() + os.linesep
+                out.write(str)
 
 # Generator that loop over an iterable and
 # print progress as we loop through
@@ -89,11 +84,8 @@ def main():
     print("Get Kegg Human Pathways ...")
     human_pathways = get_list_human_pathways()
     print("Done !")
-    print("Get GO ID from Kegg ID ...")
-    kegg2go = link_kegg_2_go(human_pathways)
+    print(f'Writting {kegg2go_path} ...')
+    write_kegg2go(human_pathways)
     print("Done !")
-    # print(f'Writting {kegg2go_path} ...')
-    # write_kegg2go()
-    # print("Done !")
     
 main()
