@@ -1,42 +1,37 @@
 ---
-title: "pdcl_process_as_1_patient"
-output:
-  html_document:
-    toc: yes
-    toc_float: true
-    number_sections: true
-    toc_depth: 3
-    highlight: kate
-    fig_width: 10
-    fig_heigth: 7
+title: "PDCL_process_as_1_patient"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: column
+    vertical_layout: fill
+    source_code: embed
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-rm(list = ls() )
+library(flexdashboard)
+knitr::opts_chunk$set(cache=TRUE)
 
 # Load required libraries (others are load directly in sourced files)
 library(DESeq2)
 library(dplyr)
 library(purrr)
 library(plotly)
-library(DT)
 
 # Source files with functions used in next steps
 source("R/pdcl_process_as_1_patient/gprofiler-analysis.R")
 source("R/pdcl_process_as_1_patient/gsea-analysis.R")
 source("R/pdcl_process_as_1_patient/process-result.R")
-source("R/pdcl_process_as_1_patient/guickgo.R")
+source("R/pdcl_process_as_1_patient/quickgo.R")
 
 # Constant
 result_dir <- "~/PhD/PDCL/Result_pdcl_process_as_1_patient/"
 ```
 
-# Load Data
+# Data Loading
 
-## Load controls
+Load controls
 
-```{r load-controls}
+```{r load-controls, echo = TRUE}
 control_file <- "Data/PDCL/astrocyte_GSE109001_counts_unique_genes_samples_filtered.txt"
 control <- read.table(
   control_file, 
@@ -60,11 +55,11 @@ control_names <- c(
   )
 ```
 
-## Load PDCL DataBase
+Load PDCL DataBase
 
 Load the PDCL count table. Disabled check.names otherwise it will add a X at the beginning of each column name, as column names aren't valid according to R.
 
-```{r load-pdcl}
+```{r load-pdcl, echo = TRUE}
 pdcl_count_table <- read.table(
   "/home/spinicck/PhD/Data/PDCL/lignees_count_genes_PDCL.txt", 
   sep = "\t", 
@@ -97,10 +92,9 @@ pdcl_names <- c(
 )
 ```
 
+Load PENDA results
 
-## Load PENDA results
-
-```{r load-penda}
+```{r load-penda, echo = TRUE}
 penda_res <- readRDS("Data/PDCL/results_penda_astrocytes_2021.rds")
 penda_res <- as.data.frame(penda_res)
 penda_pdcl_names <- names(penda_res)
@@ -109,28 +103,26 @@ penda_pdcl_names <- sub(".genes.results", "", penda_pdcl_names, ignore.case = T)
 names(penda_res) <- penda_pdcl_names
 ```
 
-## Define GMT path
-```{r define-gmt-path}
+Define GMT path
+
+```{r define-gmt-path, echo = TRUE}
 gmt_path <- list(
   reactome = "Data/gene-set/reactome_no_less_15_no_more_1000.gmt",
   kegg = "Data/gene-set/kegg_no_less_15_no_more_1000.gmt"
 )
 ```
 
-## Load GSEA GMTs
-
 Load GMT files for GSEA pathway enrichment.
 
-```{r create-gsea-gmt-list}
+```{r create-gsea-gmt-list, echo = TRUE}
 gsea_gmt_list <- lapply(gmt_path, function(x){ gmtPathways(x)})
 ```
 
-## Load G:Profiler GMTs
+Load G:Profiler GMTs
 
-Upload GMT File before running G:Profiler Enrichment Analysis if needed.
-Otherwise juste define the token of the GMT stored on G:Profiler website.
+Upload GMT File before running G:Profiler Enrichment Analysis if needed. Otherwise juste define the token of the GMT stored on G:Profiler website.
 
-```{r create-gprofiler-gmt-list}
+```{r create-gprofiler-gmt-list, echo = TRUE}
 # This portion is commented because the file are already uploaded
 gprofiler_gmt_list <- lapply(gmt_path, function(x){ upload_GMT_file(x) })
 # bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
@@ -138,14 +130,7 @@ gprofiler_gmt_list <- lapply(gmt_path, function(x){ upload_GMT_file(x) })
 # gprofiler_gmt_list <- list(reactome = "gp__VxvL_Ua0o_Irk", kegg = "gp__5f4Q_8t3p_PVw")
 ```
 
-# Differential Analysis with DESeq2
-
-## Prepare Object needed by DESeq2 for Analysis
-
-Create two data.frame:
-
--   count_data : contain the raw counts of each genes for both control and PDCL samples
--   count_metadata : metadata for associated with the samples to know which samples belong to the controls and which belong to the PDCL
+# DESeq2
 
 ```{r prepare-count-data}
 # Merge control and PDCL counts into one dataframe
@@ -169,12 +154,11 @@ count_metadata <- data.frame(
 )
 ```
 
-## Perform Differential Analysis
+## Column {data-width="400"}
 
-Perform a differential analysis for each PDCL in the database against the controls 
-and save the result in rds file and a csv file.
+### DESeq2 Result {data-height="300"}
 
-```{r run-deseq2, cache=TRUE}
+```{r run-deseq2}
 alpha <- 0.05
 dds <- DESeqDataSetFromMatrix(
   countData = count_data, 
@@ -193,64 +177,7 @@ deregulated_genes <- row.names(deseq2_res)[deregulated_index]
 summary(deseq2_res)
 ```
 
-## VolcanoPlot Differential Analysis Results
-
-```{r volcano-plot-deseq2, echo=FALSE}
-deseq2_res_df <- as.data.frame(deseq2_res)
-ggplot(
-  deseq2_res_df, 
-  aes(x = log2FoldChange, y = -log10(padj), colour = (padj<alpha) )
-) + 
-  geom_point() +
-  scale_color_manual(values = c("TRUE" = "red"), labels = c("Deregulated")) +
-  labs(
-    title = "Volcano Plot DESeq2 Results",
-    colour = NULL
-  )
-```
-
-## Volcano Plot Super Deregulated genes
-Number of super-deregulated genes (deregulated accross all the PDCL):
-
-```{r super-deregulated-genes, echo=FALSE}
-penda_genes <- row.names(penda_res)
-pdcl_dereg_genes <- imap_dfr(penda_res, function(x, y){
-  dereg_index <- which(x != 0)
-  data.frame(gene = penda_genes[dereg_index], dereg = x[dereg_index], pdcl = y)
-})
-
-sd_dereg_genes <- pdcl_dereg_genes %>%
-  count(gene, dereg) %>%
-  filter(n==length(pdcl_names)) %>%
-  arrange(gene) %>% 
-  select(gene, dereg)
-
-table(sd_dereg_genes$dereg)
-```
-
-```{r plot-sd-genes-lfc}
-deseq2_res_df$sd_dereg <- 0
-sd_index <- which(row.names(deseq2_res_df) %in% sd_dereg_genes$gene)
-keep <- row.names(deseq2_res_df)[sd_index]
-deseq2_res_df$sd_dereg[sd_index] <- sd_dereg_genes$dereg[sd_dereg_genes$gene %in% keep]
-deseq2_res_df$sd_dereg <- as.factor(deseq2_res_df$sd_dereg)
-data <- deseq2_res_df # %>% filter(sd_dereg != "0")
-data$gene <- row.names(data)
-volcano_sd_genes_lfc <- ggplot(
-  data,
-  aes(x = log2FoldChange, y = -log10(padj), colour = sd_dereg, alpha = 0.6, label = gene)
-) + 
-  geom_point() +
-  scale_color_manual(values = c("1" = "red", "-1" = "blue"), labels = c("Super Up", "Super Down")) +
-  labs(
-    title = "Volcano Plot DESeq2 Results",
-    colour = NULL
-  )
-
-volcano_sd_genes_lfc
-```
-
-## Compare DESeq2_log2FC with manually computed log2FC
+### Comparison Log2FoldChange {data-height="700"}
 
 ```{r compare-lfc}
 pdcl_mean_expr <- rowMeans(pdcl_count_table[,-1])
@@ -283,22 +210,67 @@ p_comparison_log2fc <- ggplot(
 p_comparison_log2fc
 ```
 
-# Pathways Enrichment
+## Column {data-width="600"}
+
+### Volcano Plot
+
+```{r volcano-plot-deseq2, fig.width=12}
+deseq2_res_df <- as.data.frame(deseq2_res)
+ggplot(
+  deseq2_res_df, 
+  aes(x = log2FoldChange, y = -log10(padj), colour = (padj<alpha) )
+) + 
+  geom_point() +
+  scale_color_manual(values = c("TRUE" = "red"), labels = c("Deregulated")) +
+  labs(
+    title = "Volcano Plot DESeq2 Results",
+    colour = NULL
+  )
+```
+
+### Volcano Plot Super-Deregulated genes
+
+```{r super-deregulated-genes}
+penda_genes <- row.names(penda_res)
+pdcl_dereg_genes <- imap_dfr(penda_res, function(x, y){
+  dereg_index <- which(x != 0)
+  data.frame(gene = penda_genes[dereg_index], dereg = x[dereg_index], pdcl = y)
+})
+
+sd_dereg_genes <- pdcl_dereg_genes %>%
+  count(gene, dereg) %>%
+  filter(n==length(pdcl_names)) %>%
+  arrange(gene) %>% 
+  select(gene, dereg)
+```
+
+```{r plot-sd-genes-lfc, fig.width=12}
+deseq2_res_df$sd_dereg <- 0
+sd_index <- which(row.names(deseq2_res_df) %in% sd_dereg_genes$gene)
+keep <- row.names(deseq2_res_df)[sd_index]
+deseq2_res_df$sd_dereg[sd_index] <- sd_dereg_genes$dereg[sd_dereg_genes$gene %in% keep]
+deseq2_res_df$sd_dereg <- as.factor(deseq2_res_df$sd_dereg)
+data <- deseq2_res_df # %>% filter(sd_dereg != "0")
+data$gene <- row.names(data)
+volcano_sd_genes_lfc <- ggplot(
+  data,
+  aes(x = log2FoldChange, y = -log10(padj), colour = sd_dereg, alpha = 0.6, label = gene)
+) + 
+  geom_point() +
+  scale_color_manual(values = c("1" = "red", "-1" = "blue"), labels = c("Super Up", "Super Down")) +
+  labs(
+    title = "Volcano Plot DESeq2 Results",
+    colour = NULL
+  )
+
+volcano_sd_genes_lfc
+```
 
 ```{r create-all-res-list}
 all_res <- list()
 ```
 
-
-## GSEA Pathway Enrichment
-
-Here we run a GSEA pathway enrichment analysis with the log2FoldChange calculated by DESeq2 as the scoring metrics in the ranked list submited to GSEA.
-
-*Message from Jorge :*
-
-We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
-
-```{r run-gsea, cache=TRUE}
+```{r run-gsea}
 # Create the ranked list for GSEA
 # TODO: Check but it seems that using the stat of all genes after dropping the
 # NAs seems to give the best result for GSEA (at least there is common 
@@ -323,19 +295,11 @@ gmt_desc <- lapply(gmt_path, function(x){
 all_res[["GSEA"]] <- run.gsea(rank_list, gsea_gmt_list, gmt_desc)
 ```
 
-## GProfiler Pathway Enrichment
-
-Run G:Profiler
-
-```{r run-gprofiler, cache=TRUE}
+```{r run-gprofiler}
 all_pdcl_genes <- row.names(deseq2_res)
 all_gene_list <- list("gbm" = deregulated_genes)
-
-# TODO: Run G:Profiler analysis for each db and samples
 all_res[["G:Profiler"]] <- run.gost(all_gene_list, gprofiler_gmt_list, all_pdcl_genes)
 ```
-
-# Save Result in RDS and in Generic Enrichment Map (GEM) format
 
 ```{r save-rds}
 saveRDS(all_res, file = "Result_pdcl_process_as_1_patient/all_res.rds")
@@ -355,10 +319,6 @@ save.gsea.gem.list.to.txt(all_enrichment[["GSEA"]], paste0(result_dir, "gsea/"))
 save.gost.gem.list.to.txt(all_enrichment[["G:Profiler"]], paste0(result_dir, "gprofiler/"))
 ```
 
-## Process Result
-
-### Collapse Enrichment
-
 ```{r collapse-by-method}
 # Collapse the results by method.
 # One line contain the result of one enrichment method for one pathway of one PDCL
@@ -367,16 +327,104 @@ all_enrich_collapsed <- collapse.enrichment(all_enrichment)
 threshold <- 0.1
 ```
 
-```{r count-enriched-pathways}
-data <- all_enrich_collapsed %>% filter(fdr<threshold)
-count_enrich_pathways <- ggplot(data, aes(x = method, fill = db) ) +
-  geom_bar(position = "dodge2")
-count_enrich_pathways
+# Enrichment Score {data-navmenu="GSEA" data-orientation=rows}
+
+### Reactome
+
+```{r, fig.width=9, fig.height=8}
+data <- all_res[["GSEA"]]$reactome$gbm %>%
+  dplyr::filter(padj < threshold) %>%
+  dplyr::slice(1:25)
+nes_plot_reactome <- plot.nes.gsea(data)
+nes_plot_reactome
 ```
 
-Number of commons pathways per samples and databases :
-```{r check-number-of-commons pathways}
-all_enrich_collapsed %>% filter(fdr < threshold) %>% count(sample, db, pathway_id) %>% filter(n==2) %>% count(sample, db)
+### Kegg
+
+```{r, fig.width=9, fig.height=8}
+data <- all_res[["GSEA"]]$kegg$gbm %>%
+  dplyr::filter(padj < threshold) %>%
+  dplyr::slice(1:25)
+nes_plot_reactome <- plot.nes.gsea(data)
+nes_plot_reactome  
+```
+
+# Leading Edge {data-navmenu="GSEA"}
+
+### Reactome
+
+```{r, fig.width=20}
+gsea_reactome_enriched <- all_enrich_collapsed %>%
+  dplyr::filter(method == "GSEA", fdr < threshold, db == "reactome") %>%
+  dplyr::arrange(fdr) %>%
+  dplyr::slice(1:25)
+gsea_reactome_leadedge <- plot.leading.edge(gsea_reactome_enriched, rank_list$gbm)
+# ggplotly(gsea_reactome_leadedge)
+gsea_reactome_leadedge
+```
+
+### Kegg
+
+```{r, fig.width=20}
+gsea_kegg_enriched <- all_enrich_collapsed %>%
+  dplyr::filter(method == "GSEA", fdr < threshold, db == "kegg") %>%
+  dplyr::arrange(fdr) %>%
+  dplyr::slice(1:25)
+gsea_kegg_leadedge <- plot.leading.edge(gsea_kegg_enriched, rank_list$gbm)
+# ggplotly(gsea_kegg_leadedge)
+gsea_kegg_leadedge
+```
+
+# Reactome {data-navmenu="Count Pathways Per genes"}
+
+### GSEA
+
+```{r, fig.width=20}
+data <- all_enrich_collapsed %>% 
+  dplyr::filter(fdr < threshold, db == "reactome", method == "GSEA")
+reactome_count_path_per_genes <- plot.number.pathways.per.genes(data)
+reactome_count_path_per_genes
+```
+
+### G:Profiler
+
+```{r, fig.width=20}
+data <- all_enrich_collapsed %>% 
+  dplyr::filter(fdr < threshold, db == "reactome", method == "G:Profiler")
+reactome_count_path_per_genes <- plot.number.pathways.per.genes(data)
+# ggplotly(reactome_count_path_per_genes)
+reactome_count_path_per_genes
+```
+
+# Kegg {data-navmenu="Count Pathways Per genes"}
+
+### GSEA
+
+```{r, fig.width=20}
+data <- all_enrich_collapsed %>% 
+  dplyr::filter(fdr < threshold, db == "kegg", method == "GSEA")
+kegg_count_path_per_genes <- plot.number.pathways.per.genes(data)
+kegg_count_path_per_genes
+```
+
+### G:Profiler
+
+```{r, fig.width=20}
+data <- all_enrich_collapsed %>% 
+  dplyr::filter(fdr < threshold, db == "kegg", method == "G:Profiler")
+kegg_count_path_per_genes <- plot.number.pathways.per.genes(data)
+# ggplotly(kegg_count_path_per_genes)
+kegg_count_path_per_genes
+```
+
+# Plot
+
+### Number of Enriched Pathways
+
+```{r count-enriched-pathways}
+data <- all_enrich_collapsed %>% filter(fdr<threshold)
+count_enrich_pathways <- plot.count.pathways(data)
+count_enrich_pathways
 ```
 
 ```{r find-common-pathways}
@@ -393,8 +441,11 @@ common_go_ids <- id2go %>% dplyr::filter(source_id %in% common_pathway_id) %>% p
 download.go.chart(common_go_ids, paste0(result_dir, "plot/alpha_", threshold, "/common_pathways_go_chart.png"))
 ```
 
+# Commons Pathways
 
-```{r print-mapped-ids, echo=FALSE}
+### Pathways Table
+
+```{r print-mapped-ids}
 common_pathway_2_go <- all_enrich_collapsed %>% 
   dplyr::filter(pathway_id %in% common_pathway_id) %>% 
   dplyr::distinct(pathway_id, description, db) %>%
@@ -409,7 +460,12 @@ DT::datatable(
 )
 ```
 
+# Gene Ontology
+
+### GO Map
+
+![Gene Ontology Map](Result_pdcl_process_as_1_patient/plot/alpha_0.1/common_pathways_go_chart.png)
+
 ```{r save-session, show=FALSE}
 save.image("~/PhD/PDCL/pdcl_process_as_1_patient.RData")
 ```
-
