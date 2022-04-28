@@ -20,11 +20,13 @@ library(DESeq2)
 library(dplyr)
 library(purrr)
 library(plotly)
+library(DT)
 
 # Source files with functions used in next steps
-source("R/gprofiler-analysis.R")
-source("R/gsea-analysis.R")
-source("R/plot-result.R")
+source("R/pdcl_process_as_1_patient/gprofiler-analysis.R")
+source("R/pdcl_process_as_1_patient/gsea-analysis.R")
+source("R/pdcl_process_as_1_patient/process-result.R")
+source("R/pdcl_process_as_1_patient/guickgo.R")
 
 # Constant
 result_dir <- "~/PhD/PDCL/Result_pdcl_process_as_1_patient/"
@@ -107,40 +109,33 @@ penda_pdcl_names <- sub(".genes.results", "", penda_pdcl_names, ignore.case = T)
 names(penda_res) <- penda_pdcl_names
 ```
 
+## Define GMT path
+```{r define-gmt-path}
+gmt_path <- list(
+  reactome = "Data/gene-set/reactome_no_less_15_no_more_1000.gmt",
+  kegg = "Data/gene-set/kegg_no_less_15_no_more_1000.gmt"
+)
+```
+
 ## Load GSEA GMTs
 
 Load GMT files for GSEA pathway enrichment.
 
 ```{r create-gsea-gmt-list}
-reactome_gmt_file <- gmtPathways(
-  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
-)
-gsea_gmt_list <- list(reactome = reactome_gmt_file)
+gsea_gmt_list <- lapply(gmt_path, function(x){ gmtPathways(x)})
 ```
 
 ## Load G:Profiler GMTs
 
 Upload GMT File before running G:Profiler Enrichment Analysis if needed.
-
 Otherwise juste define the token of the GMT stored on G:Profiler website.
 
-```{r upload-gmt-gprofiler}
-# This portion is commented because the file are already uploaded
-# reactome_gmt_token <- upload_GMT_file(gmtfile = 
-#  "Data/gene-set/jorge-gmt/reactome_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
-# )
-# bioplanet_gmt_token <- upload_GMT_file(gmtfile = 
-#  "Data/gene-set/jorge-gmt/bioplanet_gmt_symbol_no_unwanted_categ_no_less_10.gmt"
-# )
-
-reactome_gmt_token <- "gp__Nqmx_yxm7_37U"
-bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
-```
-
-Create a list of GMT files.
-
 ```{r create-gprofiler-gmt-list}
-gprofiler_gmt_list <- list(reactome = reactome_gmt_token)
+# This portion is commented because the file are already uploaded
+gprofiler_gmt_list <- lapply(gmt_path, function(x){ upload_GMT_file(x) })
+# bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
+# gprofiler_gmt_list <- list(reactome = "gp__Nqmx_yxm7_37U", kegg = "gp__5f4Q_8t3p_PVw")
+# gprofiler_gmt_list <- list(reactome = "gp__VxvL_Ua0o_Irk", kegg = "gp__5f4Q_8t3p_PVw")
 ```
 
 # Differential Analysis with DESeq2
@@ -218,6 +213,12 @@ ggplot(
 Number of super-deregulated genes (deregulated accross all the PDCL):
 
 ```{r super-deregulated-genes, echo=FALSE}
+penda_genes <- row.names(penda_res)
+pdcl_dereg_genes <- imap_dfr(penda_res, function(x, y){
+  dereg_index <- which(x != 0)
+  data.frame(gene = penda_genes[dereg_index], dereg = x[dereg_index], pdcl = y)
+})
+
 sd_dereg_genes <- pdcl_dereg_genes %>%
   count(gene, dereg) %>%
   filter(n==length(pdcl_names)) %>%
@@ -279,10 +280,15 @@ p_comparison_log2fc <- ggplot(
   geom_abline(slope = fit$coefficients[2], intercept = fit$coefficients[1], color = "blue") +
   labs(title = "Comparison log2FoldChange", x = "log2FC manually computed", y = "log2FC computed by DESeq2")
 
-ggplotly(p_comparison_log2fc)
+p_comparison_log2fc
 ```
 
 # Pathways Enrichment
+
+```{r create-all-res-list}
+all_res <- list()
+```
+
 
 ## GSEA Pathway Enrichment
 
@@ -293,24 +299,28 @@ Here we run a GSEA pathway enrichment analysis with the log2FoldChange calculate
 We must choose a seed to ensure the analysis is reproducible. This is because GSEA uses a permutation test to span the null distribution of the statistic. Hence, each time we run it, results are expected to change slightly.
 
 ```{r run-gsea, cache=TRUE}
-set.seed(1)
 # Create the ranked list for GSEA
+# TODO: Check but it seems that using the stat of all genes after dropping the
+# NAs seems to give the best result for GSEA (at least there is common 
+# pathways between gprofiler and gsea)
 rnk_tmp <- as.data.frame(deseq2_res) %>%
   drop_na() %>%
-  filter(padj < alpha) %>%
-  mutate(rank = log2FoldChange*-log10(padj)) %>%
+  # filter(padj < 0.1) %>%
+  # mutate(rank = log2FoldChange*-log10(padj)) %>%
+  mutate(rank = stat) %>%
   arrange(desc(rank))
 rnk <- rnk_tmp %>% pull(rank)
 names(rnk) <- row.names(rnk_tmp)
 rnk <- rnk[is.finite(rnk)]
 rank_list <- list("gbm" = rnk)
 
-# Run GSEA analysis for each ranked list for both Reactom and Bioplanet
-gsea_res_list <- lapply(rank_list, run.gsea, gsea_gmt_list)
-saveRDS(gsea_res_list, file = paste0(result_dir, "gsea_pathway_enrichment.rds"))
+gmt_desc <- lapply(gmt_path, function(x){
+  gmt_info <- read.gmt(x)
+  lapply(gmt_info, function(x){ x$description })
+})
 
-gsea_gem <- lapply(gsea_res_list, convert.gsea.to.gem)
-save.gem.list.to.txt(gsea_gem, paste0(result_dir, "gsea/deseq2/"), "deseq2")
+# Run GSEA analysis for each ranked list for both Reactome and KEGG
+all_res[["GSEA"]] <- run.gsea(rank_list, gsea_gmt_list, gmt_desc)
 ```
 
 ## GProfiler Pathway Enrichment
@@ -320,74 +330,86 @@ Run G:Profiler
 ```{r run-gprofiler, cache=TRUE}
 all_pdcl_genes <- row.names(deseq2_res)
 all_gene_list <- list("gbm" = deregulated_genes)
-gost_res_list <- lapply(all_gene_list, function(gene_list){
-  res <- run.gost(
-    gene_list,
-    all_pdcl_genes,
-    gprofiler_gmt_list
-  )
-  return(res)
-})
+
+# TODO: Run G:Profiler analysis for each db and samples
+all_res[["G:Profiler"]] <- run.gost(all_gene_list, gprofiler_gmt_list, all_pdcl_genes)
 ```
 
-Save Result in RDS and in Generic Enrichment Map (GEM) format
+# Save Result in RDS and in Generic Enrichment Map (GEM) format
 
-```{r save-gprofiler}
-saveRDS(gost_res_list, file = paste0(result_dir, "gprofiler_pathway_enrichment.rds"))
-gost_gem <- lapply(gost_res_list, convert.gost.to.gem)
-save.gem.list.to.txt(gost_gem, paste0(result_dir, "gprofiler/deseq2/"), "deseq2")
+```{r save-rds}
+saveRDS(all_res, file = "Result_pdcl_process_as_1_patient/all_res.rds")
+```
+
+```{r convert-to-enrichment}
+all_enrichment <- list()
+
+# TODO: Add pathway_desc to enrichment mapping
+all_enrichment[["GSEA"]] <- map_depth(all_res[["GSEA"]], .depth = 1, .f = convert.gsea.to.enrichment)
+
+all_enrichment[["G:Profiler"]] <- map_depth(all_res[["G:Profiler"]], .depth = 1, .f = convert.gost.to.enrichment)
+```
+
+```{r save-enrichment}
+save.gsea.gem.list.to.txt(all_enrichment[["GSEA"]], paste0(result_dir, "gsea/"))
+save.gost.gem.list.to.txt(all_enrichment[["G:Profiler"]], paste0(result_dir, "gprofiler/"))
 ```
 
 ## Process Result
 
-### Define GEM list
-
-```{r define-gem-list}
-gem_list <- list("G:Profiler" = gost_gem, "GSEA" = gsea_gem)
-```
-
-### Collapse by method
+### Collapse Enrichment
 
 ```{r collapse-by-method}
 # Collapse the results by method.
 # One line contain the result of one enrichment method for one pathway of one PDCL
-gem_collapsed <- collapse.gem.list(gem_list)
+# TODO! Redefine how it will be collapsed
+all_enrich_collapsed <- collapse.enrichment(all_enrichment)
+threshold <- 0.1
 ```
 
-### Collapse by pathways
-
-```{r collapse-by-pathways}
-gem_collapsed_method_vs_method <- collapse.method.vs.method(gem_collapsed)
+```{r count-enriched-pathways}
+data <- all_enrich_collapsed %>% filter(fdr<threshold)
+count_enrich_pathways <- ggplot(data, aes(x = method, fill = db) ) +
+  geom_bar(position = "dodge2")
+count_enrich_pathways
 ```
 
-### Find common pathways
+Number of commons pathways per samples and databases :
+```{r check-number-of-commons pathways}
+all_enrich_collapsed %>% filter(fdr < threshold) %>% count(sample, db, pathway_id) %>% filter(n==2) %>% count(sample, db)
+```
 
 ```{r find-common-pathways}
-all_common_pathways <- find.method.common.pathways(gem_collapsed_method_vs_method, c(0.05, 0.1))
-gem_collapsed_method_vs_method <- gem_collapsed_method_vs_method %>%
-  inner_join(all_common_pathways, by=c("pathway_id", "pdcl", "method_1", "method_2"))
-all_common_pathways %>% dplyr::count(alpha_0.1)
+common_pathway_id <- all_enrich_collapsed %>% 
+  filter(fdr < threshold) %>% 
+  dplyr::count(sample, db, pathway_id) %>% 
+  filter(n==2) %>% 
+  pull(pathway_id)
 ```
 
-## Plot 
-
-```{r set-alpha, include=FALSE}
-threshold <- 0.1
-plot_comp_method_dir <- paste0(result_dir, "plot/alpha_0.05/comparison_method/")
-count_dir <- paste0(result_dir, "plot/alpha_0.05/count/")
-heatmap_dir <- paste0(result_dir, "plot/alpha_0.05/heatmap/")
+```{r download-go-chart}
+id2go <- read.table("Data/gene-set/id2go.txt", sep = "\t", header = T)
+common_go_ids <- id2go %>% dplyr::filter(source_id %in% common_pathway_id) %>% pull(go_id)
+download.go.chart(common_go_ids, paste0(result_dir, "plot/alpha_", threshold, "/common_pathways_go_chart.png"))
 ```
 
-### Plot count categories 
 
-```{r count-categories-10-percent}
-count_categories_0.1 <- plot.count.categories(gem_collapsed, threshold)
-tmp_filename <- paste0(count_dir, "plot_count_categories_0.1.png")
-ggsave(tmp_filename, plot = count_categories_0.1, width = 10, height = 7)
-count_categories_0.1
+```{r print-mapped-ids, echo=FALSE}
+common_pathway_2_go <- all_enrich_collapsed %>% 
+  dplyr::filter(pathway_id %in% common_pathway_id) %>% 
+  dplyr::distinct(pathway_id, description, db) %>%
+  dplyr::left_join(id2go, by = c("pathway_id" = "source_id")) %>%
+  dplyr::arrange(go_id) %>%
+  dplyr::select(pathway_id, description, db, go_id, go_desc)
+
+DT::datatable(
+  common_pathway_2_go,
+  rownames = F,
+  caption = "Commons pathways with their mapped GO Terms"
+)
 ```
 
-```{r save-session, include=FALSE}
+```{r save-session, show=FALSE}
 save.image("~/PhD/PDCL/pdcl_process_as_1_patient.RData")
 ```
 
