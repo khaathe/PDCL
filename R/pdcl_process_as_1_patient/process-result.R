@@ -155,3 +155,20 @@ plot.nes.gsea <- function(gseares){
     )
   nes_plot
 }
+
+plot.enriched.categories <- function(collapsed.by.method, category){
+  data <- collapsed.by.method %>%
+    mutate(category = category)
+  
+  plot_title <- paste0("Count of enriched pathways per categories")
+  
+  ggplot(data, aes(category, fill = method)) +
+    geom_bar(position = "dodge2") + 
+    labs(
+      title = plot_title,
+      x = "Category",
+      y = "Count"
+    ) + 
+    theme(axis.text.x = element_text(angle = 90) ) +
+    scale_x_discrete(drop = F)
+}
