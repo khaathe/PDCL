@@ -22,6 +22,9 @@ source("R/pdcl_process_as_1_patient/gprofiler-analysis.R")
 source("R/pdcl_process_as_1_patient/gsea-analysis.R")
 source("R/pdcl_process_as_1_patient/process-result.R")
 source("R/pdcl_process_as_1_patient/quickgo.R")
+source("R/pdcl_process_as_1_patient/kegg.R")
+source("R/pdcl_process_as_1_patient/kegg.R")
+source("R/pdcl_process_as_1_patient/reactome.R")
 
 # Constant
 result_dir <- "~/PhD/PDCL/Result_pdcl_process_as_1_patient/"
@@ -331,9 +334,10 @@ threshold <- 0.1
 
 ### Reactome
 
-```{r, fig.width=9, fig.height=8}
+```{r plot-nes-reactome, fig.width=9, fig.height=8}
 data <- all_res[["GSEA"]]$reactome$gbm %>%
   dplyr::filter(padj < threshold) %>%
+  dplyr::arrange(padj) %>%
   dplyr::slice(1:25)
 nes_plot_reactome <- plot.nes.gsea(data)
 nes_plot_reactome
@@ -341,9 +345,10 @@ nes_plot_reactome
 
 ### Kegg
 
-```{r, fig.width=9, fig.height=8}
+```{r plot-nes-kegg, fig.width=9, fig.height=8}
 data <- all_res[["GSEA"]]$kegg$gbm %>%
   dplyr::filter(padj < threshold) %>%
+  dplyr::arrange(padj) %>%
   dplyr::slice(1:25)
 nes_plot_reactome <- plot.nes.gsea(data)
 nes_plot_reactome  
@@ -353,7 +358,7 @@ nes_plot_reactome
 
 ### Reactome
 
-```{r, fig.width=20}
+```{r leading-edge-reactome, fig.width=20}
 gsea_reactome_enriched <- all_enrich_collapsed %>%
   dplyr::filter(method == "GSEA", fdr < threshold, db == "reactome") %>%
   dplyr::arrange(fdr) %>%
@@ -365,7 +370,7 @@ gsea_reactome_leadedge
 
 ### Kegg
 
-```{r, fig.width=20}
+```{r leading-edge-kegg, fig.width=20}
 gsea_kegg_enriched <- all_enrich_collapsed %>%
   dplyr::filter(method == "GSEA", fdr < threshold, db == "kegg") %>%
   dplyr::arrange(fdr) %>%
@@ -379,7 +384,7 @@ gsea_kegg_leadedge
 
 ### GSEA
 
-```{r, fig.width=20}
+```{r count-path-per-genes-reac-gsea, fig.width=20}
 data <- all_enrich_collapsed %>% 
   dplyr::filter(fdr < threshold, db == "reactome", method == "GSEA")
 reactome_count_path_per_genes <- plot.number.pathways.per.genes(data)
@@ -388,11 +393,10 @@ reactome_count_path_per_genes
 
 ### G:Profiler
 
-```{r, fig.width=20}
+```{r count-path-per-genes-react-gprofiler, fig.width=20}
 data <- all_enrich_collapsed %>% 
   dplyr::filter(fdr < threshold, db == "reactome", method == "G:Profiler")
 reactome_count_path_per_genes <- plot.number.pathways.per.genes(data)
-# ggplotly(reactome_count_path_per_genes)
 reactome_count_path_per_genes
 ```
 
@@ -400,7 +404,7 @@ reactome_count_path_per_genes
 
 ### GSEA
 
-```{r, fig.width=20}
+```{r count-path-per-genes-kegg-gsea, fig.width=20}
 data <- all_enrich_collapsed %>% 
   dplyr::filter(fdr < threshold, db == "kegg", method == "GSEA")
 kegg_count_path_per_genes <- plot.number.pathways.per.genes(data)
@@ -409,7 +413,7 @@ kegg_count_path_per_genes
 
 ### G:Profiler
 
-```{r, fig.width=20}
+```{r count-path-per-genes-kegg-gprofiler, fig.width=20}
 data <- all_enrich_collapsed %>% 
   dplyr::filter(fdr < threshold, db == "kegg", method == "G:Profiler")
 kegg_count_path_per_genes <- plot.number.pathways.per.genes(data)
@@ -417,15 +421,7 @@ kegg_count_path_per_genes <- plot.number.pathways.per.genes(data)
 kegg_count_path_per_genes
 ```
 
-# Plot
-
-### Number of Enriched Pathways
-
-```{r count-enriched-pathways}
-data <- all_enrich_collapsed %>% filter(fdr<threshold)
-count_enrich_pathways <- plot.count.pathways(data)
-count_enrich_pathways
-```
+# Enrichment and Categories
 
 ```{r find-common-pathways}
 common_pathway_id <- all_enrich_collapsed %>% 
@@ -436,22 +432,66 @@ common_pathway_id <- all_enrich_collapsed %>%
 ```
 
 ```{r download-go-chart}
-id2go <- read.table("Data/gene-set/id2go.txt", sep = "\t", header = T)
+id2go <- read.table("Data/gene-set/id2go.txt", sep = "\t", header = T, as.is = T)
 common_go_ids <- id2go %>% dplyr::filter(source_id %in% common_pathway_id) %>% pull(go_id)
+
+# Download GO chart for common GO IDs
 download.go.chart(common_go_ids, paste0(result_dir, "plot/alpha_", threshold, "/common_pathways_go_chart.png"))
+```
+
+## Column {data-width=300}
+
+### Number of Enriched Pathways
+
+```{r count-enriched-pathways}
+data <- all_enrich_collapsed %>% filter(fdr<threshold)
+count_enrich_pathways <- plot.count.pathways(data)
+count_enrich_pathways
+```
+
+## Column {data-width=700}
+
+### Number of Enriched Kegg Categories
+
+```{r enriched-categories-kegg, fig.width=14}
+data <- all_enrich_collapsed %>% dplyr::filter(db == "kegg", fdr < threshold)
+kegg_entries <- get.kegg.entries(unique(data$pathway_id))
+kegg_categories <- get.kegg.categ(kegg_entries)
+kegg_categories <- sapply(kegg_categories, function(x){ x[1] })
+categories <- kegg_categories[data$pathway_id]
+names(categories) <- names(kegg_categories)
+categories <- factor(categories, level = KEGG_TOP_CATEGORIES)
+kegg_count_categories <- plot.enriched.categories(data, categories, common_pathway_id)
+kegg_count_categories
+```
+
+### Number of Enriched Reactome Categories
+
+```{r enriched-categories-reactome, fig.width=14}
+data <- all_enrich_collapsed %>% dplyr::filter(db == "reactome", fdr < threshold)
+react_ancestors_list <- get.list.reactome.ancestors( unique(data$pathway_id) )
+react_categories <- get.reactome.categories(react_ancestors_list)
+categories <- react_categories[data$pathway_id]
+categories <- factor(categories, level = REACTOME_TOP_LEVEL_PATHWAYS)
+react_count_categories <- plot.enriched.categories(data, categories, common_pathway_id)
+react_count_categories
 ```
 
 # Commons Pathways
 
 ### Pathways Table
 
-```{r print-mapped-ids}
+```{r table-common-pathways}
+all_categ_enriched <- c(kegg_categories, react_categories)
+
+# Create a data table for display
 common_pathway_2_go <- all_enrich_collapsed %>% 
   dplyr::filter(pathway_id %in% common_pathway_id) %>% 
   dplyr::distinct(pathway_id, description, db) %>%
   dplyr::left_join(id2go, by = c("pathway_id" = "source_id")) %>%
   dplyr::arrange(go_id) %>%
-  dplyr::select(pathway_id, description, db, go_id, go_desc)
+  dplyr::mutate(category = all_categ_enriched[pathway_id]) %>%
+  dplyr::select(pathway_id, description, db, category, go_id, go_desc)
 
 DT::datatable(
   common_pathway_2_go,
