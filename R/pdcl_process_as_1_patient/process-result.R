@@ -156,9 +156,16 @@ plot.nes.gsea <- function(gseares){
   nes_plot
 }
 
-plot.enriched.categories <- function(collapsed.by.method, category){
+plot.enriched.categories <- function(collapsed.by.method, category, common.pathways = NULL){
   data <- collapsed.by.method %>%
     mutate(category = category)
+  
+  if (!is.null(common.pathways)){
+    common <- which(data$pathway_id %in% common.pathways)
+    data$method <- factor(data$method, level = c("Common Pathway", levels(data$method) ))
+    data$method[common] <- "Common Pathway"
+    data <- data %>% dplyr::distinct(pathway_id, category, method)
+  }
   
   plot_title <- paste0("Count of enriched pathways per categories")
   
