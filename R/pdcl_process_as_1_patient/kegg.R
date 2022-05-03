@@ -9,7 +9,7 @@ KEGG_TOP_CATEGORIES <- c(
   "Human Diseases",
   "Metabolism",
   "Organismal Systems",
-  "No Category"
+  "Unkown"
 )
 
 get.kegg.entries <- function(kegg.ids){
@@ -29,7 +29,7 @@ get.kegg.categ <- function(kegg.entries){
   categories <- lapply(kegg.entries, function(x){
     str <- x$CLASS
     if(is.null(str)){
-      str <- "No Category"
+      str <- "Unkown"
     }
     str
   })
