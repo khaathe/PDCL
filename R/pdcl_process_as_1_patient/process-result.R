@@ -1,5 +1,6 @@
 ######## Load Library needed
 library(ggplot2)
+library(S4Vectors)
 library(ggh4x)
 library(tidyr)
 library(purrr)
@@ -141,7 +142,7 @@ plot.nes.gsea <- function(gseares){
   data <- gseares %>%
     dplyr::mutate(description = reorder(description, NES))
   
-  nb_pathways <- nrow(data)
+  nb_pathways <- dplyr::n_distinct(data$pathway)
   
   plot_title <- paste0("NES for the top ", nb_pathways , " most significant pathways")
   
@@ -178,4 +179,20 @@ plot.enriched.categories <- function(collapsed.by.method, category, common.pathw
     ) + 
     theme(axis.text.x = element_text(angle = 90) ) +
     scale_x_discrete(drop = F)
+}
+
+deep_merge <- function(el1, el2, level = 1, max.level = NULL) {
+  is_el1_list <- any(class(el1) == "list")
+  is_el2_list <- any(class(el2) == "list")
+  is_max_depth <- all(!is.null(max.level), level>=max.level)
+  if ( !is_el1_list | !is_el2_list | is_max_depth){
+    new_el <- c(el1, el2)
+    return(new_el)
+  }
+  keys <- unique(c(names(el1), names(el2)))
+  new_el <- lapply(keys, function(x){
+    deep_merge(el1[[x]], el2[[x]], level+1, max.level)
+  })
+  names(new_el) <- keys
+  new_el
 }
