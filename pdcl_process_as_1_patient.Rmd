@@ -23,7 +23,6 @@ source("R/pdcl_process_as_1_patient/gsea-analysis.R")
 source("R/pdcl_process_as_1_patient/process-result.R")
 source("R/pdcl_process_as_1_patient/quickgo.R")
 source("R/pdcl_process_as_1_patient/kegg.R")
-source("R/pdcl_process_as_1_patient/kegg.R")
 source("R/pdcl_process_as_1_patient/reactome.R")
 
 # Constant
@@ -213,11 +212,11 @@ p_comparison_log2fc <- ggplot(
 p_comparison_log2fc
 ```
 
-## Column {data-width="600"}
+## Column {data-width="600" .tabset}
 
 ### Volcano Plot
 
-```{r volcano-plot-deseq2, fig.width=12}
+```{r volcano-plot-deseq2, fig.width=12, fig.height=8}
 deseq2_res_df <- as.data.frame(deseq2_res)
 ggplot(
   deseq2_res_df, 
@@ -247,7 +246,7 @@ sd_dereg_genes <- pdcl_dereg_genes %>%
   select(gene, dereg)
 ```
 
-```{r plot-sd-genes-lfc, fig.width=12}
+```{r plot-sd-genes-lfc, fig.width=12, fig.height=8}
 deseq2_res_df$sd_dereg <- 0
 sd_index <- which(row.names(deseq2_res_df) %in% sd_dereg_genes$gene)
 keep <- row.names(deseq2_res_df)[sd_index]
@@ -267,6 +266,22 @@ volcano_sd_genes_lfc <- ggplot(
   )
 
 volcano_sd_genes_lfc
+```
+
+### Volcano Plot Stat DESeq2
+
+```{r volcano-stat, fig.width=12, fig.height=8}
+ggplot(
+  deseq2_res_df, 
+  aes(x = log2FoldChange, y = -log10(padj), colour = stat )
+) + 
+  geom_point() +
+  scale_colour_distiller(palette = "RdBu", n.breaks = 8) +
+  labs(
+    title = "Volcano Plot DESeq2 Results",
+    colour = "DESeq2 Statistic"
+  ) +
+  theme_dark()
 ```
 
 ```{r create-all-res-list}
@@ -330,13 +345,29 @@ all_enrich_collapsed <- collapse.enrichment(all_enrichment)
 threshold <- 0.1
 ```
 
+```{r find-common-pathways}
+common_pathway_id <- all_enrich_collapsed %>% 
+  filter(fdr < threshold) %>% 
+  dplyr::count(sample, db, pathway_id) %>% 
+  filter(n==2) %>% 
+  pull(pathway_id)
+```
+
+```{r download-go-chart}
+id2go <- read.table("Data/gene-set/id2go.txt", sep = "\t", header = T, as.is = T)
+common_go_ids <- id2go %>% dplyr::filter(source_id %in% common_pathway_id) %>% pull(go_id)
+
+# Download GO chart for common GO IDs
+download.go.chart(common_go_ids, paste0(result_dir, "plot/common_pathways_go_chart.png"))
+```
+
 # Enrichment Score {data-navmenu="GSEA" data-orientation=rows}
 
 ### Reactome
 
-```{r plot-nes-reactome, fig.width=9, fig.height=8}
+```{r plot-nes-reactome, fig.width=20, fig.height=8}
 data <- all_res[["GSEA"]]$reactome$gbm %>%
-  dplyr::filter(padj < threshold) %>%
+  dplyr::filter(pathway %in% common_pathway_id, padj < threshold) %>%
   dplyr::arrange(padj) %>%
   dplyr::slice(1:25)
 nes_plot_reactome <- plot.nes.gsea(data)
@@ -347,11 +378,11 @@ nes_plot_reactome
 
 ```{r plot-nes-kegg, fig.width=9, fig.height=8}
 data <- all_res[["GSEA"]]$kegg$gbm %>%
-  dplyr::filter(padj < threshold) %>%
+  dplyr::filter(pathway %in% common_pathway_id, padj < threshold) %>%
   dplyr::arrange(padj) %>%
   dplyr::slice(1:25)
-nes_plot_reactome <- plot.nes.gsea(data)
-nes_plot_reactome  
+nes_plot_kegg <- plot.nes.gsea(data)
+nes_plot_kegg
 ```
 
 # Leading Edge {data-navmenu="GSEA"}
@@ -360,7 +391,7 @@ nes_plot_reactome
 
 ```{r leading-edge-reactome, fig.width=20}
 gsea_reactome_enriched <- all_enrich_collapsed %>%
-  dplyr::filter(method == "GSEA", fdr < threshold, db == "reactome") %>%
+  dplyr::filter(pathway_id %in% common_pathway_id, method == "GSEA", fdr < threshold, db == "reactome") %>%
   dplyr::arrange(fdr) %>%
   dplyr::slice(1:25)
 gsea_reactome_leadedge <- plot.leading.edge(gsea_reactome_enriched, rank_list$gbm)
@@ -372,7 +403,7 @@ gsea_reactome_leadedge
 
 ```{r leading-edge-kegg, fig.width=20}
 gsea_kegg_enriched <- all_enrich_collapsed %>%
-  dplyr::filter(method == "GSEA", fdr < threshold, db == "kegg") %>%
+  dplyr::filter(pathway_id %in% common_pathway_id, method == "GSEA", fdr < threshold, db == "kegg") %>%
   dplyr::arrange(fdr) %>%
   dplyr::slice(1:25)
 gsea_kegg_leadedge <- plot.leading.edge(gsea_kegg_enriched, rank_list$gbm)
@@ -422,22 +453,6 @@ kegg_count_path_per_genes
 ```
 
 # Enrichment and Categories
-
-```{r find-common-pathways}
-common_pathway_id <- all_enrich_collapsed %>% 
-  filter(fdr < threshold) %>% 
-  dplyr::count(sample, db, pathway_id) %>% 
-  filter(n==2) %>% 
-  pull(pathway_id)
-```
-
-```{r download-go-chart}
-id2go <- read.table("Data/gene-set/id2go.txt", sep = "\t", header = T, as.is = T)
-common_go_ids <- id2go %>% dplyr::filter(source_id %in% common_pathway_id) %>% pull(go_id)
-
-# Download GO chart for common GO IDs
-download.go.chart(common_go_ids, paste0(result_dir, "plot/alpha_", threshold, "/common_pathways_go_chart.png"))
-```
 
 ## Column {data-width=300}
 
@@ -504,7 +519,7 @@ DT::datatable(
 
 ### GO Map
 
-![Gene Ontology Map](Result_pdcl_process_as_1_patient/plot/alpha_0.1/common_pathways_go_chart.png)
+![Gene Ontology Map](Result_pdcl_process_as_1_patient/plot/common_pathways_go_chart.png)
 
 ```{r save-session, show=FALSE}
 save.image("~/PhD/PDCL/pdcl_process_as_1_patient.RData")
