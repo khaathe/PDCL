@@ -343,15 +343,25 @@ count_enrich_pathways
 ## Column {data-width=700}
 
 ### Number of Enriched Kegg Categories
+<!-- Retrieve Categories for enriched pathways -->
+
+```{r kegg-categories, cache=TRUE}
+kegg_gs_metadata <- read.csv("Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
+kegg_gs_metadata$category <- sapply( strsplit(kegg_gs_metadata$category, ","), function(x){x[1]})
+kegg_categories <- factor(kegg_gs_metadata$category, levels = KEGG_TOP_CATEGORIES)
+names(kegg_categories) <- kegg_gs_metadata$pathway_id
+```
+
+```{r reactome-categories, cache=TRUE}
+react_gs_metadata <- read.csv("Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
+react_gs_metadata$category <- sapply( strsplit(react_gs_metadata$category, ","), function(x){x[1]})
+react_categories <- factor(react_gs_metadata$category, levels = REACTOME_TOP_LEVEL_PATHWAYS)
+names(react_categories) <- react_gs_metadata$pathway_id
+```
 
 ```{r enriched-categories-kegg, fig.width=14}
 data <- all_enrich_collapsed %>% dplyr::filter(db == "kegg", fdr < threshold)
-kegg_entries <- get.kegg.entries(unique(data$pathway_id))
-kegg_categories <- get.kegg.categ(kegg_entries)
-kegg_categories <- sapply(kegg_categories, function(x){ x[1] })
 categories <- kegg_categories[data$pathway_id]
-names(categories) <- names(kegg_categories)
-categories <- factor(categories, level = KEGG_TOP_CATEGORIES)
 kegg_count_categories <- plot.enriched.categories(data, categories, common_pathway_id)
 kegg_count_categories
 ```
@@ -360,10 +370,7 @@ kegg_count_categories
 
 ```{r enriched-categories-reactome, fig.width=14}
 data <- all_enrich_collapsed %>% dplyr::filter(db == "reactome", fdr < threshold)
-react_ancestors_list <- get.list.reactome.ancestors( unique(data$pathway_id) )
-react_categories <- get.reactome.categories(react_ancestors_list)
 categories <- react_categories[data$pathway_id]
-categories <- factor(categories, level = REACTOME_TOP_LEVEL_PATHWAYS)
 react_count_categories <- plot.enriched.categories(data, categories, common_pathway_id)
 react_count_categories
 ```
@@ -373,7 +380,8 @@ react_count_categories
 ### Pathways Table
 
 ```{r table-common-pathways}
-all_categ_enriched <- c(kegg_categories, react_categories)
+all_categ_enriched <- forcats::fct_c(kegg_categories, react_categories)
+names(all_categ_enriched) <- c(names(kegg_categories), names(react_categories))
 
 # Create a data table for display
 common_pathway_2_go <- all_enrich_collapsed %>% 
