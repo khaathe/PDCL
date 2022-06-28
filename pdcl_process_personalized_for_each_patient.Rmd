@@ -18,12 +18,12 @@ library(purrr)
 library(plotly)
 
 # Source files with functions used in next steps
-source("R/pdcl_process_as_1_patient/gprofiler-analysis.R")
-source("R/pdcl_process_as_1_patient/gsea-analysis.R")
-source("R/pdcl_process_as_1_patient/process-result.R")
-source("R/pdcl_process_as_1_patient/quickgo.R")
-source("R/pdcl_process_as_1_patient/kegg.R")
-source("R/pdcl_process_as_1_patient/reactome.R")
+source("R/gprofiler-analysis.R")
+source("R/gsea-analysis.R")
+source("R/process-result.R")
+source("R/quickgo.R")
+source("R/kegg.R")
+source("R/reactome.R")
 
 # Constant
 result_dir <- "~/PhD/PDCL/Result/"
