@@ -196,3 +196,58 @@ deep_merge <- function(el1, el2, level = 1, max.level = NULL) {
   names(new_el) <- keys
   new_el
 }
+
+# Generate a vector of breaks for ggplot graph with n values
+# inferior and superior a midpoint.
+generate.breaks <- function(min, max, midpoint, n){
+  left <- seq(from = min, to = midpoint, length.out = n ) 
+  right <- seq(from = midpoint, to = max, length.out = n )[-1]
+  c(left, right)
+}
+
+# Turn the numeric FDR col into a factor with correct labels. 
+fdr.to.factor <- function(x, n){
+  break.vect <- generate.breaks(0, 1, threshold, n)
+  cut.vect <- cut(x$fdr, breaks = break.vect, labels = break.vect[-1])
+  cut.vect <- factor(cut.vect, levels = rev(levels(cut.vect)))
+  x$fdr <- cut.vect
+  x
+}
+
+heatmap.fdr <- function(collapsed.by.method, common.pathways){
+  data <- fdr.to.factor(collapsed.by.method, 5)
+  heatmap_fdr <- ggplot(
+    data = data, 
+    aes(x = sample, y = description, fill =  fdr)
+  ) +
+    geom_tile() +
+    geom_tile(
+      data = common.pathways,
+      mapping = aes(x = sample, y = description),
+      inherit.aes = F,
+      colour = 'black',
+      fill = NA,
+      size = 0.5
+    ) +
+    labs(
+      title = "FDR value each pathways by PDCL and method",
+      x = "PDCL",
+      y = "Pathway",
+      fill = "FDR"
+    ) +
+    facet_wrap(vars(method)) +
+    scale_fill_brewer(
+      palette = "RdBu",
+      na.value = "gray30",
+      direction = -1
+    ) +
+    #We need to specify this. If not, unpopulated categories do not appear
+    scale_x_discrete(drop = F) +
+    # By default it is sorted in desc order, we reverse it so it is in asc order
+    # scale_y_discrete(limits=rev) +
+    theme(
+      axis.text.x = element_text(angle = 90),
+      panel.background = element_rect(fill = "white")
+    )
+  heatmap_fdr
+}
