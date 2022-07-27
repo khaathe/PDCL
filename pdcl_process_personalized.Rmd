@@ -26,7 +26,7 @@ source("R/kegg.R")
 source("R/reactome.R")
 
 # Constant
-result_dir <- "~/PhD/PDCL/Result/"
+result_dir <- "~/PhD/PDCL/Result_pdcl_process_personnalized/"
 ```
 
 ```{r function}
@@ -145,8 +145,8 @@ Define GMT path
 
 ```{r define-gmt-path, echo = TRUE}
 gmt_path <- list(
-  reactome = "Data/gene-set/reactome_no_less_15_no_more_1000.gmt",
-  kegg = "Data/gene-set/kegg_no_less_15_no_more_1000.gmt"
+  reactome = "Data/gene-set/reactome_no_less_15_no_more_500.gmt",
+  kegg = "Data/gene-set/kegg_no_less_15_no_more_500.gmt"
 )
 ```
 
@@ -609,5 +609,5 @@ heatmap_fdr_cell_cycle_signal
 ```
 
 ```{r save-session, show=FALSE}
-save.image("~/PhD/PDCL/pdcl_process_personalized")
+save.image("~/PhD/PDCL/pdcl_process_personalized.RData")
 ```

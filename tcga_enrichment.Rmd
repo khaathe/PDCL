@@ -61,8 +61,8 @@ prepare.count.matrix <- function(expr.dir, metadata.file){
 
 ```{r define-gmt-path, echo = TRUE}
 gmt_path <- list(
-  reactome = "Data/gene-set/reactome_no_less_15_no_more_1000.gmt",
-  kegg = "Data/gene-set/kegg_no_less_15_no_more_1000.gmt"
+  reactome = "Data/gene-set/reactome_no_less_15_no_more_500.gmt",
+  kegg = "Data/gene-set/kegg_no_less_15_no_more_500.gmt"
 )
 ```
 
