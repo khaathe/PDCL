@@ -2,20 +2,21 @@
 title: "PDCL_process_personalized"
 output: 
   flexdashboard::flex_dashboard:
-    orientation: column
+    orientation: rows
     vertical_layout: fill
     source_code: embed
 ---
 
 ```{r setup, include=FALSE}
 library(flexdashboard)
-knitr::opts_chunk$set(cache=TRUE)
 
 # Load required libraries (others are load directly in sourced files)
-library(DESeq2)
 library(dplyr)
 library(purrr)
 library(plotly)
+library(DT)
+library(mclust)
+library(factoextra)
 
 # Source files with functions used in next steps
 source("R/gprofiler-analysis.R")
@@ -26,49 +27,36 @@ source("R/kegg.R")
 source("R/reactome.R")
 
 # Constant
+rerun_rds_cached <- FALSE
 result_dir <- "~/PhD/PDCL/Result_pdcl_process_personnalized/"
 ```
 
 ```{r function}
 # This function filter and prepare the data to be plotted in a fdr heatmap
-prepare.fdr.data <- function(pattern){
+prepare.fdr.data <- function(significant_ids, pattern){
   data <- all_enrich_collapsed %>%
-    dplyr::inner_join( rbind(kegg_gs_metadata, react_gs_metadata) ) %>%
     dplyr::filter(
-      pathway_id %in% common_pathways$pathway_id, 
+      pathway_id %in% significant_ids,
       str_detect(category, regex(pattern, ignore_case = T))
     ) %>%
-    dplyr::arrange(desc(description))
+    dplyr::arrange(desc(category))
   
-  data_commons <- common_pathways %>%
-    dplyr::filter(pathway_id %in% data$pathway_id)
-  
-  ordered_description <- data %>% 
-    dplyr::distinct(description, category) %>%
-    dplyr::arrange(desc(description)) %>%
-    dplyr::pull(description)
-  
-  ordered_category <- data %>% 
-    dplyr::distinct(description, category) %>%
-    dplyr::arrange(desc(description)) %>%
-    dplyr::pull(category)
+  ordered_description <- data %>%
+      dplyr::distinct(description, category) %>%
+      dplyr::arrange(desc(category)) %>%
+      dplyr::pull(description)
   
   data$description <- factor(data$description, levels = ordered_description, ordered = T)
-  
-  list(
-    data = data, 
-    data_commons = data_commons,
-    ordered_description = ordered_description,
-    ordered_category = ordered_category
-  )
+
+  data
 }
 ```
 
-# Data Loading
+<!-- Data Loading -->
 
-Load controls
+<!-- Load controls -->
 
-```{r load-controls, echo = TRUE}
+```{r load-controls}
 control_file <- "Data/PDCL/astrocyte_GSE109001_counts_unique_genes_samples_filtered.txt"
 control <- read.table(
   control_file, 
@@ -92,11 +80,11 @@ control_names <- c(
   )
 ```
 
-Load PDCL DataBase
+<!-- Load PDCL DataBase -->
 
-Load the PDCL count table. Disabled check.names otherwise it will add a X at the beginning of each column name, as column names aren't valid according to R.
+<!-- Load the PDCL count table. Disabled check.names otherwise it will add a X at the beginning of each column name, as column names aren't valid according to R. -->
 
-```{r load-pdcl, echo = TRUE}
+```{r load-pdcl}
 pdcl_count_table <- read.table(
   "/home/spinicck/PhD/Data/PDCL/lignees_count_genes_PDCL.txt", 
   sep = "\t", 
@@ -129,9 +117,9 @@ pdcl_names <- c(
 )
 ```
 
-Load PENDA results
+<!-- Load PENDA results -->
 
-```{r load-penda, echo = TRUE}
+```{r load-penda}
 penda_res <- readRDS("Data/PDCL/results_penda_astrocytes_2021.rds")
 penda_res <- as.data.frame(penda_res)
 penda_pdcl_names <- names(penda_res)
@@ -141,145 +129,24 @@ names(penda_res) <- penda_pdcl_names
 penda_genes <- row.names(penda_res)
 ```
 
-Define GMT path
+<!-- Define GMT path -->
 
-```{r define-gmt-path, echo = TRUE}
+```{r define-gmt-path}
 gmt_path <- list(
   reactome = "Data/gene-set/reactome_no_less_15_no_more_500.gmt",
   kegg = "Data/gene-set/kegg_no_less_15_no_more_500.gmt"
 )
 ```
 
-Load GMT files for GSEA pathway enrichment.
+<!-- Load G:Profiler GMTs -->
 
-```{r create-gsea-gmt-list, echo = TRUE}
-gsea_gmt_list <- lapply(gmt_path, function(x){ gmtPathways(x)})
-```
+<!-- Upload GMT File before running G:Profiler Enrichment Analysis if needed. Otherwise juste define the token of the GMT stored on G:Profiler website. -->
 
-Load G:Profiler GMTs
-
-Upload GMT File before running G:Profiler Enrichment Analysis if needed. Otherwise juste define the token of the GMT stored on G:Profiler website.
-
-```{r create-gprofiler-gmt-list, echo = TRUE}
-# This portion is commented because the file are already uploaded
-gprofiler_gmt_list <- lapply(gmt_path, function(x){ upload_GMT_file(x) })
-# bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
-# gprofiler_gmt_list <- list(reactome = "gp__Nqmx_yxm7_37U", kegg = "gp__5f4Q_8t3p_PVw")
-# gprofiler_gmt_list <- list(reactome = "gp__VxvL_Ua0o_Irk", kegg = "gp__5f4Q_8t3p_PVw")
-```
-
-# DE Analysis
-
-```{r prepare-count-data}
-# Merge control and PDCL counts into one dataframe
-count_data <- merge(control, pdcl_count_table, by.x = "symbol", by.y = "gene_id")
-# Associate each row with a gene symbol
-row.names(count_data) <- count_data$symbol
-# Remove symbol and id columns
-count_data <- count_data %>% dplyr::select(!c(symbol, id))
-condition_vect <- c(
-  rep("control", length(control_names)), 
-  rep("pdcl", length(pdcl_names))
-)
-count_metadata <- data.frame(
-  sample = c(control_names, pdcl_names), 
-  condition=condition_vect
-)
-count_metadata$condition <- as.factor(count_metadata$condition)
-```
-
-```{r run-deseq2, cache=TRUE}
-deseq2_res_list <- lapply(pdcl_names, function(pdcl){
-  dataset_pdcl <- c(control_names, pdcl)
-  # Subract a dataset which contains only the counts for the
-  # current PDCL
-  dataset <- count_data[,dataset_pdcl]
-  # Same with metadata
-  dataset_metadata <- count_metadata[ count_metadata$sample %in% dataset_pdcl, ]
-  # Perform DESeq2 Analysis
-  dds <- DESeqDataSetFromMatrix(
-    countData = dataset, 
-    colData = dataset_metadata, 
-    design = ~condition
-  )
-  dds <- DESeq(dds)
-  res <- results(dds, alpha = 0.05)
-})
-names(deseq2_res_list) <- pdcl_names
-```
-
-
-```{r save-deseq2}
-# Save Result in rds file and write a csv file for each PDCL.
-saveRDS(deseq2_res_list, file = paste0(result_dir, "deseq2_pdcl_vs_control.rds"))
-
-for (pdcl in pdcl_names){
-  deseq2_res <- deseq2_res_list[[pdcl]]
-  res.file <-  paste0(result_dir, "deseq2/", pdcl, ".csv")
-  write.csv(as.data.frame(deseq2_res), file = res.file)
-}
-```
-
-
-## Column {.tabset}
-
-### Volcano -log10(padj)
-
-```{r collapse-de-result}
-de_res <- lapply(deseq2_res_list, function(x){
-  df <- as.data.frame(x)
-  df$gene <- row.names(x)
-  row.names(df) <- NULL
-  df
-})
-de_res <- map.list.to.df(de_res, "sample")
-
-penda_res_collapsed <- imap_dfr(penda_res, function(x, y){
-  data.frame(gene = penda_genes, penda_predict = x, sample = y)
-})
-
-de_res <- de_res %>%
-  dplyr::inner_join(penda_res_collapsed) %>%
-  dplyr::mutate(penda_predict = as.factor(penda_predict)) %>%
-  dplyr::relocate(sample, gene)
-```
-
-
-```{r volcano-plot-log10padj, fig.width=14, fig.height=8}
-volcano_plot_log10padj <- ggplot(
-    de_res, 
-    aes( log2FoldChange, -log10(padj), colour = penda_predict, alpha = penda_predict )
-  ) +
-    geom_point() +
-    scale_colour_manual( values = c("1" = "red", "-1"="blue", "0" = "grey50") )  +
-    scale_alpha_manual(values = c("1" = 0.8, "-1" = 0.8, "0" = 0.4) ) +
-    labs(
-      title = "Comparison DESeq2 fold change vs PENDA Result",
-      colour = "Penda Prediction", 
-      alpha = "Penda Prediction"
-    ) + 
-  facet_wrap(~sample)
-volcano_plot_log10padj
-```
-
-
-### Volcano abs(stat)
-
-```{r volcano-plot-stat, fig.width=14, fig.height=8}
-volcano_plot_stat <- ggplot(
-    de_res, 
-    aes( log2FoldChange, abs(stat), colour = penda_predict, alpha = penda_predict )
-  ) +
-    geom_point() +
-    scale_colour_manual( values = c("1" = "red", "-1"="blue", "0" = "grey50") )  +
-    scale_alpha_manual(values = c("1" = 0.8, "-1" = 0.8, "0" = 0.4) ) +
-    labs(
-      title = "Comparison DESeq2 fold change vs PENDA Result",
-      colour = "Penda Prediction", 
-      alpha = "Penda Prediction"
-    ) + 
-  facet_wrap(~sample)
-volcano_plot_stat
+```{r create-gprofiler-gmt-list}
+# Use RDS caching so we don't have to reupload the gmt files each times
+gprofiler_gmt_list <- xfun::cache_rds({
+  lapply(gmt_path, function(x){ upload_GMT_file(x) })
+}, file = "gprofiler_gmt.rds", dir = result_dir, rerun = rerun_rds_cached)
 ```
 
 
@@ -287,164 +154,57 @@ volcano_plot_stat
 all_res <- list()
 ```
 
-```{r run-gsea, cache=TRUE}
-set.seed(1)
-
-rank_list <- lapply(deseq2_res_list, function(x){
-  rnk <- x$stat
-  names(rnk) <- row.names(x)
-  rnk <- rnk[!is.na(rnk) & is.finite(rnk)]
-  rnk <- sort(rnk, decreasing = T)
-  rnk
-})
-
-gmt_desc <- lapply(gmt_path, function(x){
-  gmt_info <- read.gmt(x)
-  lapply(gmt_info, function(x){ x$description })
-})
-
-# Run GSEA analysis for each ranked list for both Reactome and KEGG
-all_res[["GSEA"]] <- run.gsea(rank_list, gsea_gmt_list, gmt_desc)
-```
-
-```{r run-gprofiler, cache=TRUE}
+```{r run-gprofiler}
 all_pdcl_genes <- row.names(penda_res)
 all_gene_list <- lapply(penda_res, function(x){
   all_pdcl_genes[x != 0]
 })
-all_res[["G:Profiler"]] <- run.gost(all_gene_list, gprofiler_gmt_list, all_pdcl_genes)
+# Use RDS caching as G:Profiler run are long for 20 samples
+all_res[["G:Profiler"]] <- xfun::cache_rds({
+  run.gost(all_gene_list, gprofiler_gmt_list, all_pdcl_genes)
+}, file = "gprofiler_result", dir = result_dir, rerun = rerun_rds_cached)
 ```
 
-```{r convert-to-enrichment}
+```{r convert-to-enrichment} 
 all_enrichment <- list()
-
-# TODO: Add pathway_desc to enrichment mapping
-all_enrichment[["GSEA"]] <- map_depth(all_res[["GSEA"]], .depth = 1, .f = convert.gsea.to.enrichment)
-
 all_enrichment[["G:Profiler"]] <- map_depth(all_res[["G:Profiler"]], .depth = 1, .f = convert.gost.to.enrichment)
+```
+
+<!-- Retrieve Categories for enriched pathways -->
+
+```{r gs-metadata}
+kegg_gs_metadata <- read.csv("Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
+react_gs_metadata <- read.csv("Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
+all_gs_metadata <- rbind(kegg_gs_metadata, react_gs_metadata)
 ```
 
 ```{r collapse-by-method}
 # Collapse the results by method.
 # One line contain the result of one enrichment method for one pathway of one PDCL
-# TODO! Redefine how it will be collapsed
-all_enrich_collapsed <- collapse.enrichment(all_enrichment)
-threshold <- 0.1
+gs_category <- all_gs_metadata %>% dplyr::select(pathway_id, category)
+all_enrich_collapsed <- collapse.enrichment(all_enrichment) %>% dplyr::inner_join(gs_category)
+threshold <- 0.05
 ```
 
-```{r find-common-pathways}
-common_pathways <- all_enrich_collapsed %>% 
-  filter(fdr < threshold) %>% 
-  dplyr::count(sample, db, pathway_id, description) %>% 
-  filter(n==2)
+```{r filter-significant}
+# We need to turn the category column as a factor so when we count the number
+# of pathways per category, categories with 0 pathways are not dropped
+kegg_significant <- all_enrich_collapsed %>%
+  dplyr::filter(fdr < threshold, db == "kegg") 
+
+reactome_significant <- all_enrich_collapsed %>%
+  dplyr::filter(fdr < threshold, db == "reactome")
 ```
 
-```{r gprofiler-vs-gsea}
-gprofiler_res <- all_enrich_collapsed %>%
-    filter(method == "G:Profiler")
-  gsea_res <- all_enrich_collapsed %>%
-    filter(method == "GSEA")
-  gprofiler_vs_gsea <- gprofiler_res %>%
-    dplyr::full_join(gsea_res, by = c("pathway_id", "description", "db", "sample")) %>%
-    dplyr::rename(pval_gprofiler = p_value.x, pval_gsea = p_value.y, fdr_gprofiler = fdr.x, fdr_gsea = fdr.y) %>%
-    select(sample, db, pathway_id, description, pval_gprofiler, pval_gsea, fdr_gprofiler, fdr_gsea)
-```
+# Category Enriched {data-navmenu="Kegg"}
 
-# Kegg {data-navmenu="Comparison Enrichment"}
+## {.tabset}
 
-### Comparison Enrichment
-
-```{r compare-enrichment-kegg, fig.width=14, fig.height=8}
-data <- gprofiler_vs_gsea %>%
-  dplyr::filter(db == "kegg")
-  
-comparison_kegg <- ggplot(
-  data = data, 
-  aes(
-    x = -log10(fdr_gprofiler), 
-    y = -log10(fdr_gsea),
-    colour = (fdr_gprofiler<threshold & fdr_gsea<threshold)
-  )
-) +
-  geom_point(
-    size = 0.5
-  ) +
-  scale_colour_manual(values = c("TRUE" = "red", "FALSE" = "grey30"), label = c("Common", "Specific")) +
-  facet_wrap(vars(sample)) +
-  labs(
-    title = "Comparison fdr of G:Profiler vs GSEA for the Kegg Database",
-    subtitle = "Threshold alpha : 0.1",
-    x = paste0( "-log10(fdr G:Profiler)"),
-    y = paste0( "-log10(fdr GSEA)"),
-    colour = ""
-  ) +
-  theme(
-    plot.title = element_text(hjust = 0.5,face = "bold",color = "red"),
-    plot.subtitle = element_text(hjust = 0.5,face = "italic",color = "blue"),
-    axis.text.x = element_text(angle = 90)
-  ) 
-comparison_kegg
-```
-
-# Reactome {data-navmenu="Comparison Enrichment"}
-
-### Comparison Enrichment
-
-```{r compare-enrichment-reactome, fig.width=14, fig.height=8}
-data <- gprofiler_vs_gsea %>%
-  dplyr::filter(db == "reactome")
-  
-comparison_reactome <- ggplot(
-  data = data, 
-  aes(
-    x = -log10(fdr_gprofiler), 
-    y = -log10(fdr_gsea),
-    colour = (fdr_gprofiler<threshold & fdr_gsea<threshold)
-  )
-) +
-  geom_point(
-    size = 0.5
-  ) +
-  scale_colour_manual(values = c("TRUE" = "red", "FALSE" = "grey30"), label = c("Common", "Specific")) +
-  facet_wrap(vars(sample)) +
-  labs(
-    title = "Comparison fdr of G:Profiler vs GSEA  for the Reactome Database",
-    subtitle = "Threshold alpha : 0.1",
-    x = paste0( "-log10(fdr G:Profiler)"),
-    y = paste0( "-log10(fdr GSEA)"),
-    colour = ""
-  ) +
-  theme(
-    plot.title = element_text(hjust = 0.5,face = "bold",color = "red"),
-    plot.subtitle = element_text(hjust = 0.5,face = "italic",color = "blue"),
-    axis.text.x = element_text(angle = 90)
-  ) 
-comparison_reactome
-```
-
-
-<!-- Retrieve Categories for enriched pathways -->
-
-```{r kegg-categories, cache=TRUE}
-kegg_gs_metadata <- read.csv("Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
-kegg_categories <- factor(kegg_gs_metadata$category, levels = KEGG_TOP_CATEGORIES)
-names(kegg_categories) <- kegg_gs_metadata$pathway_id
-```
-
-```{r reactome-categories, cache=TRUE}
-react_gs_metadata <- read.csv("Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
-react_categories <- factor(react_gs_metadata$category, levels = REACTOME_TOP_LEVEL_PATHWAYS)
-names(react_categories) <- react_gs_metadata$pathway_id
-```
-
-# Kegg {data-navmenu="Category Enriched"}
-
-### Nb Pathway Enriched per Categories
+### Heatmap Categories
 
 ```{r nb-pathway-enriched-per-kegg-categories, fig.width=16, fig.height=10}
-count <- all_enrich_collapsed %>%
-  dplyr::filter(fdr < threshold, db == "kegg") %>%
-  dplyr::mutate(category = kegg_categories[pathway_id] ) %>%
+count <- kegg_significant %>%
+  dplyr::mutate(category = factor(category, levels = KEGG_TOP_CATEGORIES)) %>% 
   dplyr::count(sample, method, category, .drop = F)
 
 enriched_categories_kegg <- ggplot(
@@ -458,7 +218,6 @@ enriched_categories_kegg <- ggplot(
     y = "Categories",
     fill = "Count"
   ) +
-  facet_wrap(~method) +
   scale_fill_viridis_c(direction = 1) +
   theme(axis.text.x = element_text(angle = 90) ) +
   # By default it is sorted in desc order, we reverse it so it is in asc order
@@ -466,14 +225,128 @@ enriched_categories_kegg <- ggplot(
 enriched_categories_kegg
 ```
 
-# Reactome {data-navmenu="Category Enriched"}
+### Barplot Categories
 
-### Nb Pathway Enriched per Categories
+```{r common-pathways-kegg, fig.width=14, fig.height=8}
+rank_pdcl <- kegg_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = pdcl_names)) %>%
+  dplyr::count(sample, .drop = FALSE) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::pull(sample)
+
+data <- kegg_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = rank_pdcl))
+
+barplot_kegg_categories <- ggplot(data, aes(x = sample, fill = category)) +
+  geom_bar() +
+  scale_x_discrete(drop = FALSE) +
+  theme(axis.text.x = element_text(angle = 90) )
+barplot_kegg_categories
+```
+
+# Enrichment Per PDCL {data-navmenu="Kegg"}
+
+## {.tabset}
+
+### Heatmap FDR Metabolism and Cellular Processes
+
+```{r heatmap-fdr-kegg-metabolism-cellular-processes, fig.width=18, fig.height=12}
+data <- prepare.fdr.data(kegg_significant$pathway_id, "\\bmetabolism|cellular\\s+processes\\b")
+heatmap_fdr_kegg_metabolism_ecm <- heatmap.fdr(data)
+heatmap_fdr_kegg_metabolism_ecm
+```
+
+### Heatmap FDR Cell Cycle
+
+```{r heatmap-fdr-kegg-organismal-systems, fig.width=18, fig.height=12}
+data <- prepare.fdr.data(kegg_significant$pathway_id, "organismal\\s+systems")
+heatmap_fdr_kegg_cell_cycle_signal <- heatmap.fdr(data)
+heatmap_fdr_kegg_cell_cycle_signal
+```
+
+# Frequently Deregulated {data-navmenu="Kegg"}
+
+### Table of the frequently deregulated genes
+
+```{r freq-dereg-kegg}
+freq_dereg_kegg <- kegg_significant %>%
+  dplyr::count(pathway_id, description, category) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::rename(count=n)
+datatable(freq_dereg_kegg)
+```
+
+# Clustering {data-navmenu="Kegg" data-orientation=columns}
+
+```{r count-tot-for-cluster}
+gmt <- lapply(gmt_path, read.gmt)
+list_tot_count <- purrr::imap(gmt, function(x,y){
+  all_gs_metadata %>% 
+    dplyr::filter(pathway_id %in% names(x)) %>%
+    dplyr::count(category) %>%
+    dplyr::mutate(category = factor(category))
+})
+```
+
+
+```{r cluster-kegg}
+table_kegg_category <- kegg_significant %>% 
+  dplyr::select(sample, category) %>%
+  dplyr::mutate(category = factor(category, levels = list_tot_count$kegg$category)) %>%
+  dplyr::count(sample, category, .drop = F) %>%
+  tidyr::pivot_wider(names_from = category, values_from = n) %>%
+  tibble::as_tibble()
+clustering_vector_kegg <- mapply("/", table_kegg_category[-1], list_tot_count$kegg$n)
+row.names(clustering_vector_kegg) <- table_kegg_category$sample
+clustering_vector_kegg <- clustering_vector_kegg[,colSums(clustering_vector_kegg) > 0]
+# Other way to do it
+# clustering_vector_kegg <- sweep(clustering_vector_kegg, 2, list_tot_count$kegg$n, "/")
+kmeans_kegg <- kmeans(clustering_vector_kegg, centers = 5, nstart = 50)
+mclust_kegg <- mclust::Mclust(clustering_vector_kegg)
+pca_kegg <- prcomp(clustering_vector_kegg, scale = T)
+```
+
+## {.tabset}
+
+### Cluster Plot K-Means KEGG
+
+```{r cluster-plot-kmeans-kegg, fig.width=12, fig.height=7}
+cluster_plot_kmeans_kegg <- fviz_cluster(kmeans_kegg, clustering_vector_kegg, repel = TRUE) + 
+  labs(title = "Cluster Plot K-Means KEGG (5 centers)") +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+  geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+cluster_plot_kmeans_kegg
+```
+
+### Cluster Plot MClust KEGG
+
+```{r cluster-plot-mclust-kegg, fig.width=12, fig.height=7}
+cluster_plot_mclust_kegg <- fviz_cluster(mclust_kegg, clustering_vector_kegg, repel = TRUE) +
+  labs(title = "Cluster Plot MClust KEGG") +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+  geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+cluster_plot_mclust_kegg
+```
+
+##
+
+### Var Correlation
+
+```{r plot-corr-circle-kegg, fig.width=8, fig.height=8}
+corr_circle_plot_kegg <- fviz_pca_var(pca_kegg, axes = c(1,2), repel = T)
+corr_circle_plot_kegg
+```
+
+
+# Category Enriched {data-navmenu="Reactome"}
+
+## {.tabset}
+
+### Heatmap Categories
 
 ```{r nb-pathway-enriched-per-reactome-categories, fig.width=16, fig.height=10}
-count <- all_enrich_collapsed %>%
-  dplyr::filter(fdr < threshold, db == "reactome") %>%
-  dplyr::mutate(category = react_categories[pathway_id] ) %>%
+count <- reactome_significant %>%
+  dplyr::mutate(category = factor(category, levels = REACTOME_TOP_LEVEL_PATHWAYS)) %>%
   dplyr::count(sample, method, category, .drop = F)
 
 enriched_categories_reactome <- ggplot(
@@ -487,7 +360,6 @@ enriched_categories_reactome <- ggplot(
     y = "Categories",
     fill = "Count"
   ) +
-  facet_wrap(~method) +
   scale_fill_viridis_c(direction = 1) +
   theme(axis.text.x = element_text(angle = 90) ) +
   # By default it is sorted in desc order, we reverse it so it is in asc order
@@ -495,119 +367,137 @@ enriched_categories_reactome <- ggplot(
 enriched_categories_reactome
 ```
 
-# Commons pathways {data-navmenu="Category Enriched" data-orientation=rows}
-
-### Kegg
-
-```{r common-pathways-kegg, fig.width=14, fig.height=8}
-kegg_commons <- common_pathways %>%
-  dplyr::inner_join( rbind(kegg_gs_metadata, react_gs_metadata)) %>%
-  dplyr::filter(db == "kegg") %>%
-  dplyr::select(!c(n, size))
-
-barplot_kegg_commons <- ggplot(kegg_commons, aes(x = sample, fill = category)) +
-  geom_bar() +
-  theme(axis.text.x = element_text(angle = 90) )
-barplot_kegg_commons
-```
-
-
-### Reactome
+### Barplot Categories
 
 ```{r common-pathways-reactome, fig.width=14, fig.height=8}
-reactome_commons <- common_pathways %>%
-  dplyr::inner_join( rbind(kegg_gs_metadata, react_gs_metadata)) %>%
-  dplyr::filter(db == "reactome") %>%
-  dplyr::select(!c(n, size))
+rank_pdcl <- reactome_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = pdcl_names)) %>%
+  dplyr::count(sample, .drop = FALSE) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::pull(sample)
 
-barplot_reactome_commons <- ggplot(reactome_commons, aes(x = sample, fill = category)) +
+data <- reactome_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = rank_pdcl))
+
+barplot_reactome_categories <- ggplot(data, aes(x = sample, fill = category)) +
   geom_bar() +
+  scale_x_discrete(drop = FALSE) +
   theme(axis.text.x = element_text(angle = 90) )
-barplot_reactome_commons
+barplot_reactome_categories
 ```
 
-# Count Enriched Pathways {data-orientation=rows}
+# Enrichment Per PDCL {data-navmenu="Reactome"}
 
-### Count Enriched pathways per method
-
-```{r count-enriched-method, fig.width=14, fig.height=8}
-data <- all_enrich_collapsed %>%
-  dplyr::filter(fdr<threshold)
-count_enriched_method <- ggplot(
-  data = data, 
-  aes(x = sample, fill = db)
-) +
-  geom_bar(position = "dodge2") +
-  labs(
-    title = "Number of enriched pathways for each enrichment method",
-    x = "Method",
-    y = "Counts",
-    fill = ""
-  ) +
-  theme(
-    plot.title = element_text(hjust = 0.5)
-  ) +
-  facet_wrap(~method, nrow = 2, ncol = 1) +
-  theme(axis.text.x = element_text(angle = 90) )
-count_enriched_method
-```
-
-### Count commons per PDCL
-
-```{r count-common-pdcl, fig.width=14, fig.height=8}
-count_common <- ggplot(
-  data = common_pathways, 
-  aes(x = sample, fill = db) 
-) +
-  geom_bar(position = "dodge2") +
-  labs(
-    title = "Number of common pathways for each pdcl",
-    x = "Method",
-    y = "Counts",
-    fill = ""
-  ) +
-  theme(
-    plot.title = element_text(hjust = 0.5)
-  ) +
-  theme(axis.text.x = element_text(angle = 90) )
-count_common
-```
-
-
-# Enrichment Per PDCL
-
-## Column {.tabset}
+## {.tabset}
 
 ### Heatmap FDR Metabolism and ECM
 
-```{r heatmap-fdr-metabolism-ecm, fig.width=18, fig.height=12}
-heatmap_fdr_metabolism_ecm <- with( prepare.fdr.data("\\bmetabolism|matrix\\b") ,{
-  heatmap.fdr(data, data_commons) +
-  guides(
-    y.sec =  guide_axis_manual(
-      labels = ordered_category,
-      title = "Category"
-    )
-  )
-})
-heatmap_fdr_metabolism_ecm
+```{r heatmap-fdr-reactome-metabolism-ecm, fig.width=18, fig.height=12}
+data <- prepare.fdr.data(reactome_significant$pathway_id, "\\bmetabolism|matrix\\b")
+heatmap_fdr_reactome_metabolism_ecm <- heatmap.fdr(data)
+heatmap_fdr_reactome_metabolism_ecm
 ```
 
 ### Heatmap FDR Cell Cycle
 
-```{r heatmap-fdr-cell-cycle-and-signalling, fig.width=18, fig.height=12}
-heatmap_fdr_cell_cycle_signal <- with( prepare.fdr.data("\\b(cell.*|dna|signal|processing)\\b") ,{
-  heatmap.fdr(data, data_commons) +
-  guides(
-    y.sec =  guide_axis_manual(
-      labels = ordered_category,
-      title = "Category"
-    )
-  )
-})
-heatmap_fdr_cell_cycle_signal
+```{r heatmap-fdr-reactome-cell-cycle-and-signalling, fig.width=18, fig.height=12}
+data <- prepare.fdr.data(reactome_significant$pathway_id, "\\b(cell.*|dna|signal|processing)\\b")
+heatmap_fdr_reactome_cell_cycle_signal <- heatmap.fdr(data)
+heatmap_fdr_reactome_cell_cycle_signal
 ```
 
-```{r save-session, show=FALSE}
+# Frequently Deregulated {data-navmenu="Reactome"}
+
+### Table of the frequently deregulated genes
+
+```{r freq-dereg-reactome}
+freq_dereg_reactome <- reactome_significant %>%
+  dplyr::count(pathway_id, description, category) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::rename(count=n)
+datatable(freq_dereg_reactome)
+```
+
+# Clustering {data-navmenu="Reactome" data-orientation=columns}
+
+```{r cluster-reactome}
+table_reactome_category <- reactome_significant %>% 
+  dplyr::select(sample, category) %>%
+  dplyr::mutate(category = factor(category, levels = list_tot_count$reactome$category)) %>%
+  dplyr::count(sample, category, .drop = F) %>%
+  tidyr::pivot_wider(names_from = category, values_from = n) %>%
+  tibble::as_tibble()
+clustering_vector_reactome <- mapply("/", table_reactome_category[-1], list_tot_count$reactome$n)
+row.names(clustering_vector_reactome) <- table_reactome_category$sample
+clustering_vector_reactome <- clustering_vector_reactome[,colSums(clustering_vector_reactome) > 0]
+# Other way to do it
+# clustering_vector_kegg <- sweep(clustering_vector_kegg, 2, list_tot_count$kegg$n, "/")
+kmeans_reactome <- kmeans(clustering_vector_reactome, centers = 5, nstart = 50)
+mclust_reactome<- mclust::Mclust(clustering_vector_reactome)
+pca_reactome <- prcomp(clustering_vector_reactome, scale = T)
+```
+
+## {.tabset}
+
+### Cluster Plot K-Means reactome
+
+```{r cluster-plot-kmeans-reactome, fig.width=12, fig.height=7}
+cluster_plot_kmeans_reactome <- fviz_cluster(kmeans_reactome, clustering_vector_reactome, repel = TRUE) + 
+  labs(title = "Cluster Plot K-Means reactome (5 centers)") +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+  geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+cluster_plot_kmeans_reactome
+```
+
+### Cluster Plot MClust reactome
+
+```{r cluster-plot-mclust-reactome, fig.width=12, fig.height=7}
+cluster_plot_mclust_reactome <- fviz_cluster(mclust_reactome, clustering_vector_reactome, repel = TRUE) +
+  labs(title = "Cluster Plot MClust reactome")+
+  geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+  geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+cluster_plot_mclust_reactome
+```
+
+##
+
+### Var Correlation
+
+```{r plot-corr-circle-reactome, fig.width=8, fig.height=8}
+corr_circle_plot_reactome <- fviz_pca_var(pca_reactome, axes = c(1,2), repel = T)
+corr_circle_plot_reactome
+```
+
+# Count Enriched Pathways
+
+### Count Enriched pathways per Databases
+
+```{r count-enriched-db, fig.width=14, fig.height=8}
+data <- all_enrich_collapsed %>% dplyr::filter(fdr<threshold)
+count_enriched_method <- ggplot(
+  data = data,
+  aes(x = sample, fill = db)
+) +
+  geom_bar(position = "dodge2") +
+  labs(
+    title = "Number of enriched pathways per databases",
+    x = "PDCL sample",
+    y = "Counts",
+    fill = ""
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  theme(axis.text.x = element_text(angle = 90) )
+count_enriched_method
+```
+
+```{r plot-contrib-pca-kegg, fig.width=8, fig.height=8, eval=FALSE}
+plot_contrig_pca_kegg <- fviz_contrib(pca_kegg, choice = "var")
+plot_contrig_pca_kegg
+```
+
+
+```{r save-session}
 save.image("~/PhD/PDCL/pdcl_process_personalized.RData")
 ```
