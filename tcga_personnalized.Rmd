@@ -1,0 +1,482 @@
+---
+title: "TCGA Personnalized"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    source_code: embed
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+
+# Load required libraries (others are load directly in sourced files)
+library(Biobase)
+library(dplyr)
+library(purrr)
+library(plotly)
+library(DT)
+library(mclust)
+library(factoextra)
+library(penda)
+
+# Source files with functions used in next steps
+source("R/gprofiler-analysis.R")
+source("R/gsea-analysis.R")
+source("R/process-result.R")
+source("R/quickgo.R")
+source("R/kegg.R")
+source("R/reactome.R")
+
+# Constant
+rerun_rds_cached <- FALSE
+result_dir <- "~/PhD/PDCL/Result_TCGA_personnalized/"
+```
+
+```{r prepare-count-data}
+# The matrix was prepared beforehand, we just need to the txt file
+count_data <- read.table("Data/TCGA-GBM-v32.0/count_matrix.txt", header = T, sep = "\t", as.is = T, row.names = 1, check.names = F)
+count_data <- count_data[isUnique(count_data$gene_name),] # Keep unique genes only
+row.names(count_data) <- count_data$gene_name
+count_data <- count_data[,-1] # remove the gene names column
+count_metadata <- read.table("Data/TCGA-GBM-v32.0/gdc_sample_sheet.2022-07-18.tsv", header = T, as.is = T, sep = "\t", check.names = F)
+names(count_metadata) <- c("file_id",	"file_name", "data_category", "data_type", "project_id", "case_id", "sample_id", "sample_type")
+count_metadata$condition <- "tumor"
+index_normal <- grep("normal", count_metadata$sample_type, ignore.case = T, perl = T)
+count_metadata$condition[index_normal] <- "solid_tissue_normal"
+count_metadata$condition <- as.factor(count_metadata$condition)
+```
+
+```{r make-data}
+dds <- DESeqDataSetFromMatrix(
+  countData = count_data, 
+  colData = count_metadata, 
+  design = ~condition
+)
+dds <- DESeq(dds)
+pld <- normTransform(dds)
+normalized_count <- assay(pld, blind = F)
+control_index <- which(count_metadata$condition == "control")
+control_names <- colnames(normalized_count)[control_index]
+all_data <- as.matrix(normalized_count)
+```
+
+<!-- 
+  Here we prepare several PenDA datasets to perform crossed-validation.
+  We don't have enough controls so we use this approach to ensure the quality
+  of the Differential Expression analysis.
+--> 
+```{r make-penda-datasets}
+nb_validation_run <- 10
+validation_ctrl <- combn(control_names, 2, simplify = F)
+validation_index <- sample(1:length(validation_ctrl), nb_validation_run)
+validation_ctrl <- validation_ctrl[validation_index]
+
+all_penda_datasets <- lapply(1:nb_validation_run, function(i){
+  validation_ctrl_set <- validation_ctrl[[i]]
+  names_ctrl_set <- control_names[!(control_names %in% validation_ctrl_set)]
+  index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
+  cases <- all_data[,-index_ctrl_set]
+  ctrl <- all_data[,index_ctrl_set]
+  penda_dataset <- penda::make_dataset(ctrl, cases, detectlowvalue = T, detectNA = T, threshold = 0.99)
+})
+```
+
+```{r compute-L-H-lists}
+all_L_H_list <- lapply(all_penda_datasets, function(penda_dataset){
+  penda::compute_lower_and_higher_lists(penda_dataset$data_ctrl, threshold = 0.99, s_max = 30)
+})
+```
+
+```{r run-penda}
+threshold_test <- 0.6
+iterations <- 20
+quant_test <- 0.0
+factor_test <- 1.2
+all_penda_res <- lapply(1:length(all_penda_datasets), function(i){
+  penda_dataset <- all_penda_datasets[[i]]
+  L_H_list <- all_L_H_list[[i]]
+  penda::penda_test(
+    samples = penda_dataset$data_case, 
+    controls = penda_dataset$data_ctrl, 
+    threshold = threshold_test, 
+    iterations = iterations,
+    L_H_list = L_H_list,
+    quant_test = quant_test,
+    factor_test = factor_test
+  )
+})
+```
+
+<!-- Define GMT path -->
+
+```{r define-gmt-path}
+gmt_path <- list(
+  reactome = "Data/gene-set/reactome_no_less_15_no_more_500.gmt",
+  kegg = "Data/gene-set/kegg_no_less_15_no_more_500.gmt"
+)
+```
+
+<!-- Load G:Profiler GMTs -->
+
+<!-- Upload GMT File before running G:Profiler Enrichment Analysis if needed. Otherwise juste define the token of the GMT stored on G:Profiler website. -->
+
+```{r create-gprofiler-gmt-list}
+# Use RDS caching so we don't have to reupload the gmt files each times
+gprofiler_gmt_list <- xfun::cache_rds({
+  lapply(gmt_path, function(x){ upload_GMT_file(x) })
+}, file = "gprofiler_gmt.rds", dir = result_dir, rerun = rerun_rds_cached)
+```
+
+
+```{r create-all-res-list}
+all_res <- list()
+```
+
+```{r run-gprofiler}
+all_pdcl_genes <- row.names(penda_res)
+all_gene_list <- lapply(penda_res, function(x){
+  all_pdcl_genes[x != 0]
+})
+# Use RDS caching as G:Profiler run are long for 20 samples
+all_res[["G:Profiler"]] <- xfun::cache_rds({
+  run.gost(all_gene_list, gprofiler_gmt_list, all_pdcl_genes)
+}, file = "gprofiler_result", dir = result_dir, rerun = rerun_rds_cached)
+```
+
+```{r convert-to-enrichment} 
+all_enrichment <- list()
+all_enrichment[["G:Profiler"]] <- map_depth(all_res[["G:Profiler"]], .depth = 1, .f = convert.gost.to.enrichment)
+```
+
+<!-- Retrieve Categories for enriched pathways -->
+
+```{r gs-metadata}
+kegg_gs_metadata <- read.csv("Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
+react_gs_metadata <- read.csv("Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
+all_gs_metadata <- rbind(kegg_gs_metadata, react_gs_metadata)
+```
+
+```{r collapse-by-method}
+# Collapse the results by method.
+# One line contain the result of one enrichment method for one pathway of one PDCL
+gs_category <- all_gs_metadata %>% dplyr::select(pathway_id, category)
+all_enrich_collapsed <- collapse.enrichment(all_enrichment) %>% dplyr::inner_join(gs_category)
+threshold <- 0.05
+```
+
+```{r filter-significant}
+# We need to turn the category column as a factor so when we count the number
+# of pathways per category, categories with 0 pathways are not dropped
+kegg_significant <- all_enrich_collapsed %>%
+  dplyr::filter(fdr < threshold, db == "kegg") 
+
+reactome_significant <- all_enrich_collapsed %>%
+  dplyr::filter(fdr < threshold, db == "reactome")
+```
+
+# Category Enriched {data-navmenu="Kegg"}
+
+## {.tabset}
+
+### Heatmap Categories
+
+```{r nb-pathway-enriched-per-kegg-categories, fig.width=16, fig.height=10}
+count <- kegg_significant %>%
+  dplyr::mutate(category = factor(category, levels = KEGG_TOP_CATEGORIES)) %>% 
+  dplyr::count(sample, method, category, .drop = F)
+
+enriched_categories_kegg <- ggplot(
+  data = count,
+  aes(x = sample, y = category, fill = n)
+) + 
+  geom_raster() +
+  labs(
+    title = "Number of pathways enriched in each categories for each PDCL",
+    x = "PDCL",
+    y = "Categories",
+    fill = "Count"
+  ) +
+  scale_fill_viridis_c(direction = 1) +
+  theme(axis.text.x = element_text(angle = 90) ) +
+  # By default it is sorted in desc order, we reverse it so it is in asc order
+  scale_y_discrete(limits=rev)
+enriched_categories_kegg
+```
+
+### Barplot Categories
+
+```{r common-pathways-kegg, fig.width=14, fig.height=8}
+rank_pdcl <- kegg_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = pdcl_names)) %>%
+  dplyr::count(sample, .drop = FALSE) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::pull(sample)
+
+data <- kegg_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = rank_pdcl))
+
+barplot_kegg_categories <- ggplot(data, aes(x = sample, fill = category)) +
+  geom_bar() +
+  scale_x_discrete(drop = FALSE) +
+  theme(axis.text.x = element_text(angle = 90) )
+barplot_kegg_categories
+```
+
+# Enrichment Per PDCL {data-navmenu="Kegg"}
+
+## {.tabset}
+
+### Heatmap FDR Metabolism and Cellular Processes
+
+```{r heatmap-fdr-kegg-metabolism-cellular-processes, fig.width=18, fig.height=12}
+data <- prepare.fdr.data(kegg_significant$pathway_id, "\\bmetabolism|cellular\\s+processes\\b")
+heatmap_fdr_kegg_metabolism_ecm <- heatmap.fdr(data)
+heatmap_fdr_kegg_metabolism_ecm
+```
+
+### Heatmap FDR Cell Cycle
+
+```{r heatmap-fdr-kegg-organismal-systems, fig.width=18, fig.height=12}
+data <- prepare.fdr.data(kegg_significant$pathway_id, "organismal\\s+systems")
+heatmap_fdr_kegg_cell_cycle_signal <- heatmap.fdr(data)
+heatmap_fdr_kegg_cell_cycle_signal
+```
+
+# Frequently Deregulated {data-navmenu="Kegg"}
+
+### Table of the frequently deregulated genes
+
+```{r freq-dereg-kegg}
+freq_dereg_kegg <- kegg_significant %>%
+  dplyr::count(pathway_id, description, category) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::rename(count=n)
+datatable(freq_dereg_kegg)
+```
+
+# Clustering {data-navmenu="Kegg" data-orientation=columns}
+
+```{r count-tot-for-cluster}
+gmt <- lapply(gmt_path, read.gmt)
+list_tot_count <- purrr::imap(gmt, function(x,y){
+  all_gs_metadata %>% 
+    dplyr::filter(pathway_id %in% names(x)) %>%
+    dplyr::count(category) %>%
+    dplyr::mutate(category = factor(category))
+})
+```
+
+
+```{r cluster-kegg}
+table_kegg_category <- kegg_significant %>% 
+  dplyr::select(sample, category) %>%
+  dplyr::mutate(category = factor(category, levels = list_tot_count$kegg$category)) %>%
+  dplyr::count(sample, category, .drop = F) %>%
+  tidyr::pivot_wider(names_from = category, values_from = n) %>%
+  tibble::as_tibble()
+clustering_vector_kegg <- mapply("/", table_kegg_category[-1], list_tot_count$kegg$n)
+row.names(clustering_vector_kegg) <- table_kegg_category$sample
+clustering_vector_kegg <- clustering_vector_kegg[,colSums(clustering_vector_kegg) > 0]
+# Other way to do it
+# clustering_vector_kegg <- sweep(clustering_vector_kegg, 2, list_tot_count$kegg$n, "/")
+kmeans_kegg <- kmeans(clustering_vector_kegg, centers = 5, nstart = 50)
+mclust_kegg <- mclust::Mclust(clustering_vector_kegg)
+pca_kegg <- prcomp(clustering_vector_kegg, scale = T)
+```
+
+## {.tabset}
+
+### Cluster Plot K-Means KEGG
+
+```{r cluster-plot-kmeans-kegg, fig.width=12, fig.height=7}
+cluster_plot_kmeans_kegg <- fviz_cluster(kmeans_kegg, clustering_vector_kegg, repel = TRUE) + 
+  labs(title = "Cluster Plot K-Means KEGG (5 centers)") +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+  geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+cluster_plot_kmeans_kegg
+```
+
+### Cluster Plot MClust KEGG
+
+```{r cluster-plot-mclust-kegg, fig.width=12, fig.height=7}
+cluster_plot_mclust_kegg <- fviz_cluster(mclust_kegg, clustering_vector_kegg, repel = TRUE) +
+  labs(title = "Cluster Plot MClust KEGG") +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+  geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+cluster_plot_mclust_kegg
+```
+
+##
+
+### Var Correlation
+
+```{r plot-corr-circle-kegg, fig.width=8, fig.height=8}
+corr_circle_plot_kegg <- fviz_pca_var(pca_kegg, axes = c(1,2), repel = T)
+corr_circle_plot_kegg
+```
+
+
+# Category Enriched {data-navmenu="Reactome"}
+
+## {.tabset}
+
+### Heatmap Categories
+
+```{r nb-pathway-enriched-per-reactome-categories, fig.width=16, fig.height=10}
+count <- reactome_significant %>%
+  dplyr::mutate(category = factor(category, levels = REACTOME_TOP_LEVEL_PATHWAYS)) %>%
+  dplyr::count(sample, method, category, .drop = F)
+
+enriched_categories_reactome <- ggplot(
+  data = count,
+  aes(x = sample, y = category, fill = n)
+) + 
+  geom_raster() +
+  labs(
+    title = "Number of pathways enriched in each categories for each PDCL",
+    x = "PDCL",
+    y = "Categories",
+    fill = "Count"
+  ) +
+  scale_fill_viridis_c(direction = 1) +
+  theme(axis.text.x = element_text(angle = 90) ) +
+  # By default it is sorted in desc order, we reverse it so it is in asc order
+  scale_y_discrete(limits=rev)
+enriched_categories_reactome
+```
+
+### Barplot Categories
+
+```{r common-pathways-reactome, fig.width=14, fig.height=8}
+rank_pdcl <- reactome_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = pdcl_names)) %>%
+  dplyr::count(sample, .drop = FALSE) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::pull(sample)
+
+data <- reactome_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = rank_pdcl))
+
+barplot_reactome_categories <- ggplot(data, aes(x = sample, fill = category)) +
+  geom_bar() +
+  scale_x_discrete(drop = FALSE) +
+  theme(axis.text.x = element_text(angle = 90) )
+barplot_reactome_categories
+```
+
+# Enrichment Per PDCL {data-navmenu="Reactome"}
+
+## {.tabset}
+
+### Heatmap FDR Metabolism and ECM
+
+```{r heatmap-fdr-reactome-metabolism-ecm, fig.width=18, fig.height=12}
+data <- prepare.fdr.data(reactome_significant$pathway_id, "\\bmetabolism|matrix\\b")
+heatmap_fdr_reactome_metabolism_ecm <- heatmap.fdr(data)
+heatmap_fdr_reactome_metabolism_ecm
+```
+
+### Heatmap FDR Cell Cycle
+
+```{r heatmap-fdr-reactome-cell-cycle-and-signalling, fig.width=18, fig.height=12}
+data <- prepare.fdr.data(reactome_significant$pathway_id, "\\b(cell.*|dna|signal|processing)\\b")
+heatmap_fdr_reactome_cell_cycle_signal <- heatmap.fdr(data)
+heatmap_fdr_reactome_cell_cycle_signal
+```
+
+# Frequently Deregulated {data-navmenu="Reactome"}
+
+### Table of the frequently deregulated genes
+
+```{r freq-dereg-reactome}
+freq_dereg_reactome <- reactome_significant %>%
+  dplyr::count(pathway_id, description, category) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::rename(count=n)
+datatable(freq_dereg_reactome)
+```
+
+# Clustering {data-navmenu="Reactome" data-orientation=columns}
+
+```{r cluster-reactome}
+table_reactome_category <- reactome_significant %>% 
+  dplyr::select(sample, category) %>%
+  dplyr::mutate(category = factor(category, levels = list_tot_count$reactome$category)) %>%
+  dplyr::count(sample, category, .drop = F) %>%
+  tidyr::pivot_wider(names_from = category, values_from = n) %>%
+  tibble::as_tibble()
+clustering_vector_reactome <- mapply("/", table_reactome_category[-1], list_tot_count$reactome$n)
+row.names(clustering_vector_reactome) <- table_reactome_category$sample
+clustering_vector_reactome <- clustering_vector_reactome[,colSums(clustering_vector_reactome) > 0]
+# Other way to do it
+# clustering_vector_kegg <- sweep(clustering_vector_kegg, 2, list_tot_count$kegg$n, "/")
+kmeans_reactome <- kmeans(clustering_vector_reactome, centers = 3, nstart = 50)
+mclust_reactome<- mclust::Mclust(clustering_vector_reactome)
+pca_reactome <- prcomp(clustering_vector_reactome, scale = T)
+```
+
+## {.tabset}
+
+### Cluster Plot K-Means reactome
+
+```{r cluster-plot-kmeans-reactome, fig.width=12, fig.height=7}
+cluster_plot_kmeans_reactome <- fviz_cluster(kmeans_reactome, clustering_vector_reactome, repel = TRUE) + 
+  labs(title = "Cluster Plot K-Means reactome (5 centers)") +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+  geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+cluster_plot_kmeans_reactome
+```
+
+### Cluster Plot MClust reactome
+
+```{r cluster-plot-mclust-reactome, fig.width=12, fig.height=7}
+cluster_plot_mclust_reactome <- fviz_cluster(mclust_reactome, clustering_vector_reactome, repel = TRUE) +
+  labs(title = "Cluster Plot MClust reactome")+
+  geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+  geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+cluster_plot_mclust_reactome
+```
+
+##
+
+### Var Correlation
+
+```{r plot-corr-circle-reactome, fig.width=8, fig.height=8}
+corr_circle_plot_reactome <- fviz_pca_var(pca_reactome, axes = c(1,2), repel = T)
+corr_circle_plot_reactome
+```
+
+# Count Enriched Pathways
+
+### Count Enriched pathways per Databases
+
+```{r count-enriched-db, fig.width=14, fig.height=8}
+data <- all_enrich_collapsed %>% dplyr::filter(fdr<threshold)
+count_enriched_method <- ggplot(
+  data = data,
+  aes(x = sample, fill = db)
+) +
+  geom_bar(position = "dodge2") +
+  labs(
+    title = "Number of enriched pathways per databases",
+    x = "PDCL sample",
+    y = "Counts",
+    fill = ""
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  theme(axis.text.x = element_text(angle = 90) )
+count_enriched_method
+```
+
+```{r plot-contrib-pca-kegg, fig.width=8, fig.height=8, eval=FALSE}
+plot_contrig_pca_kegg <- fviz_contrib(pca_kegg, choice = "var")
+plot_contrig_pca_kegg
+```
+
+
+```{r save-session}
+save.image("~/PhD/PDCL/pdcl_process_personalized.RData")
+```
