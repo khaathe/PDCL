@@ -22,6 +22,7 @@ source("R/kegg.R")
 source("R/reactome.R")
 
 # Constant
+rerun_cache <- F
 result_dir <- "Result_tcga_define_optimal_param/"
 ```
 
@@ -54,24 +55,26 @@ all_data <- as.matrix(normalized_count)
 ```
 
 ```{r make-penda-datasets}
-simulated_cases <- list(
-  "1" = control_names[1],
-  "2" = control_names[2],
-  "3" = control_names[3]
-)
-all_penda_datasets <- lapply(1:length(simulated_cases), function(i){
-  data_simu <- simulated_cases[[i]]
-  names_ctrl_set <- control_names[!(control_names %in% data_simu)]
-  index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
-  cases <- all_data[,-control_index]
-  ctrl <- all_data[,index_ctrl_set]
-  penda::make_dataset(ctrl, cases, detectlowvalue = T, detectNA = T, threshold = 0.99)
-})
-all_simulated_datasets <- lapply(1:length(simulated_cases), function(i){
-  data_simu <- simulated_cases[[i]]
-  data_ctrl <- all_penda_datasets[[i]]$data_ctrl
-  all_data[row.names(data_ctrl),data_simu]
-})
+simulated_cases <- lapply(control_names, function(x){x})
+
+all_penda_datasets <- xfun::cache_rds({
+  lapply(1:length(simulated_cases), function(i){
+    data_simu <- simulated_cases[[i]]
+    names_ctrl_set <- control_names[!(control_names %in% data_simu)]
+    index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
+    cases <- all_data[,-control_index]
+    ctrl <- all_data[,index_ctrl_set]
+    penda::make_dataset(ctrl, cases, detectlowvalue = T, detectNA = T, threshold = 0.99)
+  })
+}, file = "all_penda_datasets.rds", rerun = rerun_cache, dir = result_dir)
+
+all_simulated_datasets <- xfun::cache_rds({
+  lapply(1:length(simulated_cases), function(i){
+    data_simu <- simulated_cases[[i]]
+    data_ctrl <- all_penda_datasets[[i]]$data_ctrl
+    all_data[row.names(data_ctrl),data_simu]
+  })
+}, file = "all_simulated_datasets.rds", rerun = rerun_cache, dir = result_dir)
 ```
 
 ```{r compute-L-H-Lists}
@@ -83,12 +86,14 @@ all_L_H_list <- lapply(all_penda_datasets, function(penda_dataset){
 ```{r make-simulations}
 size_grp <- 100
 quant_simu <- 0.05
-all_simulation <- lapply(1:length(all_simulated_datasets), function(i){
-  data_ctrl <- all_penda_datasets[[i]]$data_ctrl
-  data_cases <- all_penda_datasets[[i]]$data_case
-  data_simu <- all_simulated_datasets[[i]]
-  penda::complex_simulation(data_ctrl, data_cases, data_simu, size_grp, quant_simu)
-})
+all_simulation <- xfun::cache_rds({
+  lapply(1:length(all_simulated_datasets), function(i){
+    data_ctrl <- all_penda_datasets[[i]]$data_ctrl
+    data_cases <- all_penda_datasets[[i]]$data_case
+    data_simu <- all_simulated_datasets[[i]]
+    penda::complex_simulation(data_ctrl, data_cases, data_simu, size_grp, quant_simu)
+  })
+}, file = "all_simulation.rds", rerun = rerun_cache, dir = result_dir)
 ```
 
 ```{r define-best-quantile}
