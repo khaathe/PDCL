@@ -5,7 +5,7 @@ library(reticulate)
 reticulate::use_python("/usr/bin/python3")
 reticulate::py_run_string("import sys")
 
-setwd("PhD/PDCL/")
+setwd("~/PhD/PDCL/")
 source("R/process-result.R")
 
 all_enrich <- read.csv("all_results.csv", as.is = T)
@@ -244,6 +244,7 @@ data_commons$description <- factor(data_commons$description, levels = unique(dat
 
 heatmap_fdr_pathway <- heatmap.fdr(data, data_commons) +
   scale_y_discrete(limits = rev) +
+  facet_wrap(vars(method)) +
   labs(
     title = "FDR value for each samples in the PDCL datasets in G:Profiler and GSEA",
     x = "Sample"

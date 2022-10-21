@@ -214,28 +214,19 @@ fdr.to.factor <- function(x, n){
   x
 }
 
-heatmap.fdr <- function(collapsed.by.method, common.pathways){
+heatmap.fdr <- function(collapsed.by.method, highlight.pathways=NULL){
   data <- fdr.to.factor(collapsed.by.method, 5)
   heatmap_fdr <- ggplot(
     data = data, 
     aes(x = sample, y = description, fill =  fdr)
   ) +
     geom_tile() +
-    geom_tile(
-      data = common.pathways,
-      mapping = aes(x = sample, y = description),
-      inherit.aes = F,
-      colour = 'black',
-      fill = NA,
-      size = 0.5
-    ) +
     labs(
       title = "FDR value each pathways by PDCL and method",
       x = "PDCL",
       y = "Pathway",
       fill = "FDR"
     ) +
-    facet_wrap(vars(method)) +
     scale_fill_brewer(
       palette = "RdBu",
       na.value = "gray30",
@@ -249,5 +240,16 @@ heatmap.fdr <- function(collapsed.by.method, common.pathways){
       axis.text.x = element_text(angle = 90),
       panel.background = element_rect(fill = "white")
     )
+  if( !is.null(highlight.pathways) ){
+    heatmap_fdr <- heatmap_fdr +
+      geom_tile(
+        data = highlight.pathways,
+        mapping = aes(x = sample, y = description),
+        inherit.aes = F,
+        colour = 'black',
+        fill = NA,
+        size = 0.5
+      )
+  }
   heatmap_fdr
 }
