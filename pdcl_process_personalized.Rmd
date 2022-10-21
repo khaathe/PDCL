@@ -432,7 +432,7 @@ row.names(clustering_vector_reactome) <- table_reactome_category$sample
 clustering_vector_reactome <- clustering_vector_reactome[,colSums(clustering_vector_reactome) > 0]
 # Other way to do it
 # clustering_vector_kegg <- sweep(clustering_vector_kegg, 2, list_tot_count$kegg$n, "/")
-kmeans_reactome <- kmeans(clustering_vector_reactome, centers = 5, nstart = 50)
+kmeans_reactome <- kmeans(clustering_vector_reactome, centers = 3, nstart = 50)
 mclust_reactome<- mclust::Mclust(clustering_vector_reactome)
 pca_reactome <- prcomp(clustering_vector_reactome, scale = T)
 ```
