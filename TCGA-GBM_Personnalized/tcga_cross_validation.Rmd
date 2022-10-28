@@ -1,0 +1,290 @@
+---
+title: "Cross Validation Penda on PDCL"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, include=FALSE}
+# Load required libraries (others are load directly in sourced files)
+library(Biobase)
+library(dplyr)
+library(purrr)
+library(plotly)
+library(DT)
+library(mclust)
+library(factoextra)
+library(penda)
+library(DESeq2)
+
+knitr::opts_knit$set(root.dir = "~/PhD/Project/pdcl_penda/")
+
+# Source files with functions used in next steps
+source("~/PhD/PDCL/R/gprofiler-analysis.R")
+source("~/PhD/PDCL/R/process-result.R")
+source("~/PhD/PDCL/R/quickgo.R")
+source("~/PhD/PDCL/R/kegg.R")
+source("~/PhD/PDCL/R/reactome.R")
+
+validation_datasets_param <- list(
+  nb_validation_run = 10,
+  nb_validation_ctrl = 2
+)
+penda_datasets_param <- list(
+  detectlowvalue = T, 
+  detectNA = T, 
+  threshold = 0.99
+)
+penda_L_H_params <- list(
+  threshold = 0.99, 
+  s_max = 30
+)
+penda_test_param <- list(
+  threshold_test = 0.6,
+  iterations = 10,
+  quant_test = 0.0,
+  factor_test = 1.2
+)
+rerun_cache <- F
+result_dir = "Result_pdcl_cross_validation/"
+```
+
+# Prepare Data
+
+```{r load-controls}
+control_file <- "~/PhD/PDCL/Data/PDCL/astrocyte_GSE109001_counts_unique_genes_samples_filtered.txt"
+control <- read.table(
+  control_file, 
+  header = T, 
+  sep = "\t", 
+  as.is = c("id", "symbol")
+)
+control_names <- c(
+  "AF22_NES_Astro_Br1_d29_37_S46",
+  "AF22_NES_Astro_Br2_d29_38_S56",
+  "AF22_NES_Astro_Br3_d29_39_S66",
+  "CCF.STTG1_p24_Br1_S16",
+  "CCF.STTG1_p24_Br2_S17",
+  "CCF.STTG1_p24_Br3_S18",
+  "CDIAstrocytes_p2_Br1_S19",
+  "CDIAstrocytes_p2_Br2_S20",
+  "CDIAstrocytes_p2_Br3_S21",
+  "phaAstrocyte_p2_Br1_S1",
+  "phaAstrocyte_p2_Br2_S2",
+  "phaAstrocyte_p2_Br3_S3"
+  )
+```
+
+```{r load-pdcl}
+pdcl_count_table <- read.table(
+  "~/PhD/PDCL/Data/PDCL/lignees_count_genes_PDCL.txt", 
+  sep = "\t", 
+  header = T, 
+  as.is = "gene_id", 
+  check.names = F
+)
+
+pdcl_names <- c(
+  "4339-p21",
+  "4371-p37",
+  "5706-p14",
+  "6190-p43",
+  "6240-p12",
+  "7015-p17",
+  "7060-p18", 
+  "7142-p14",
+  "N13-1300",
+  "N13-1520-p9",
+  "N14-0072",
+  "N14-0870",
+  "N14-1208",
+  "N14-1525",
+  "N15_0460",
+  "N15_0516",
+  "N15-0385",
+  "N15-0661",
+  "N16_0535",
+  "N16-0240"
+)
+```
+
+```{r prepare-count-data}
+# Merge control and PDCL counts into one dataframe
+count_data <- merge(control, pdcl_count_table, by.x = "symbol", by.y = "gene_id")
+# Associate each row with a gene symbol
+row.names(count_data) <- count_data$symbol
+# Remove symbol and id columns
+count_data <- count_data %>% dplyr::select(!c(symbol, id))
+condition_vect <- c(
+  rep("control", length(control_names)), 
+  rep("pdcl", length(pdcl_names))
+)
+sample <- gsub("^(.*)_(Br\\d.*)", "\\1", colnames(count_data), ignore.case = T, perl = T, fixed = F)
+# sample[(length(control_names)+1):length(sample)] <- "gbm"
+replicate <- gsub("^(.*)_(Br\\d.*)", "\\2", colnames(count_data), ignore.case = T, perl = T, fixed = F)
+count_metadata <- data.frame(
+  sample = as.factor(sample),
+  replicate = as.factor(replicate),
+  condition = as.factor(condition_vect),
+  row.names = colnames(count_data)
+)
+```
+
+```{r make-data}
+dds <- DESeqDataSetFromMatrix(
+  countData = count_data, 
+  colData = count_metadata, 
+  design = ~condition
+)
+dds <- DESeq(dds)
+pld <- normTransform(dds)
+normalized_count <- assay(pld, blind = F)
+control_index <- which(count_metadata$condition == "control")
+control_names <- colnames(normalized_count)[control_index]
+all_data <- as.matrix(normalized_count)
+```
+
+Here we prepare several PenDA datasets to perform crossed-validation.
+We don't have enough controls so we use this approach to ensure the quality of the Differential Expression analysis.
+
+```{r make-penda-datasets}
+validation_ctrl <- combn(control_names, validation_datasets_param$nb_validation_ctrl, simplify = F)
+validation_index <- sample(1:length(validation_ctrl), validation_datasets_param$nb_validation_run)
+validation_ctrl <- validation_ctrl[validation_index]
+
+all_penda_datasets <- xfun::cache_rds({
+  with(penda_datasets_param, {
+    lapply(1:validation_datasets_param$nb_validation_run, function(i){
+      validation_ctrl_set <- validation_ctrl[[i]]
+      names_ctrl_set <- control_names[!(control_names %in% validation_ctrl_set)]
+      index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
+      cases <- all_data[,-index_ctrl_set]
+      ctrl <- all_data[,index_ctrl_set]
+      penda::make_dataset(ctrl, cases, detectlowvalue = detectlowvalue, detectNA = detectNA, threshold = threshold)
+    })
+  })
+}, rerun = rerun_cache, file = "all_penda_datasets.rds", dir = result_dir)
+```
+
+```{r compute-L-H-lists}
+all_L_H_list <- with(penda_L_H_params, {
+  lapply(all_penda_datasets, function(penda_dataset){
+    penda::compute_lower_and_higher_lists(penda_dataset$data_ctrl, threshold = threshold, s_max = s_max)
+  })
+})
+```
+
+We hide the results of this chunck because it will overload the doc with unnecessary comments.
+```{r run-penda, results='hide'}
+all_penda_res <- xfun::cache_rds({
+  with(penda_test_param, {
+    lapply(1:length(all_penda_datasets), function(i){
+      penda_dataset <- all_penda_datasets[[i]]
+      L_H_list <- all_L_H_list[[i]]
+      penda::penda_test(
+        samples = penda_dataset$data_case, 
+        controls = penda_dataset$data_ctrl, 
+        threshold = threshold_test, 
+        iterations = iterations,
+        L_H_list = L_H_list,
+        quant_test = quant_test,
+        factor_test = factor_test
+      )
+    })
+  })
+}, rerun = rerun_cache, file = "all_penda_res.rds", dir = result_dir)
+```
+
+# Common Deregulations
+
+```{r common-dereg-percentage, fig.width=12, fig.height=8}
+results_combination <- combn(1:length(all_penda_res), 2, simplify = F)
+common_dereg_percentage <- purrr::imap_dfr(results_combination, function(combination, i){
+  index_res1 <- combination[1]
+  index_res2 <- combination[2]
+  res1 <- all_penda_res[[index_res1]]
+  res2 <- all_penda_res[[index_res2]]
+  if( any(dim(res1$down_genes) != dim(res2$down_genes)) | any(dim(res1$up_genes) != dim(res2$up_genes)) ){
+    warning("Down or Up genes matrix dimensions don't match between ", index_res1, " and ", index_res2, ". Returning 0% commons deregulation.")
+    return( data.frame(sample = colnames(res1$down), down = 0, up = 0, combination_numb = i, combination_pair = paste0(combination, collapse = "-"), row.names = NULL) )
+  }
+  res1 <- lapply(all_penda_res[[index_res1]], function(x){
+    x[, !(colnames(x) %in% control_names)]
+    x <- x[order(row.names(x)),]
+    x
+  })
+  res2 <- lapply(all_penda_res[[index_res2]], function(x){
+    x[, !(colnames(x) %in% control_names)]
+    x <- x[order(row.names(x)),]
+    x
+  })
+  down_commons <- colSums(res1$down & res2$down)/colSums(res1$down | res2$down)
+  up_commons <- colSums(res1$up & res2$up)/colSums(res1$up | res2$up)
+  data.frame(sample = colnames(res1$down), down=down_commons, up = up_commons, combination_numb = i, combination_pair = paste0(combination, collapse = "-"), row.names = NULL)
+})
+
+data <- common_dereg_percentage %>%
+  dplyr::filter(!(sample %in% control_names)) %>%
+  tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
+  dplyr::mutate(run = as.factor(combination_numb))
+
+plot_common_dereg_percent <- ggplot(data, aes(x = run, y = percent, colour = dereg)) +
+  geom_point() +
+  geom_hline(yintercept = 0.9, colour = "red", alpha = 0.6) +
+  ylim(c(0,1))
+plot_common_dereg_percent
+```
+
+```{r dereg-perecent, fig.width=12, fig.height=8}
+dereg_percentage <- purrr::imap_dfr(all_penda_res, function(penda_res, run){
+  up <- colSums(penda_res$up_genes)/nrow(penda_res$up_genes)
+  down <- colSums(penda_res$down_genes)/nrow(penda_res$down_genes)
+  total <- up + down
+  data.frame(sample = names(up), up = up, down = down, total = total, run = run, row.names = NULL)
+})
+```
+
+# Deregulation Tumour Percent
+
+```{r tumour-dereg-perecent}
+data <- dereg_percentage %>%
+  tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
+  dplyr::filter(!(sample %in% control_names)) %>%
+  dplyr::mutate(run = as.factor(run))
+
+plot_dereg_percent_tumour <- ggplot(data, aes(x = run, y = percent, colour = dereg)) +
+  geom_point() +
+  geom_hline(yintercept = c(0.05, 0.1, 0.3, 0.5), colour = "grey", linetype = "dashed") +
+  ylim(c(0,1))
+plot_dereg_percent_tumour
+```
+
+# Deregulation Controls Percentage
+
+```{r controls-dereg-perecent}
+data <- dereg_percentage %>%
+  tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
+  dplyr::filter(sample %in% control_names) %>%
+  dplyr::mutate(run = as.factor(run))
+
+plot_dereg_percent_control <- ggplot(data, aes(x = run, y = percent, colour = dereg)) +
+  geom_point() +
+  geom_hline(yintercept = c(0.05, 0.1), colour = c("red", "blue"), linetype = "dotted") +
+  ylim(c(0,1))
+plot_dereg_percent_control
+```
+
+# Parameter Values
+```{r print-param}
+validation_datasets_param
+penda_datasets_param
+penda_L_H_params
+penda_test_param
+rerun_cache
+result_dir
+```
+
+```{r save-image, include=FALSE}
+save.image("pdcl_cross_validation.RData")
+```

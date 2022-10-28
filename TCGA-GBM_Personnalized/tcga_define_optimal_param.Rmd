@@ -1,0 +1,256 @@
+---
+title: "TCGA-GBM : Optimal Parameters"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Load required libraries (others are load directly in sourced files)
+library(Biobase)
+library(dplyr)
+library(purrr)
+library(penda)
+library(DESeq2)
+
+knitr::opts_knit$set(root.dir = "~/PhD/Project/PDCL/TGCA-GBM_Personnalized/")
+
+# Source files with functions used in next steps
+source("~/PhD/Project/PDCL/R/gprofiler-analysis.R")
+source("~/PhD/Project/PDCL/R/process-result.R")
+source("~/PhD/Project/PDCL/R/quickgo.R")
+source("~/PhD/Project/PDCL/R/kegg.R")
+source("~/PhD/Project/PDCL/R/reactome.R")
+
+validation_datasets_param <- list(
+  nb_validation_run = 10,
+  nb_validation_ctrl = 2
+)
+penda_datasets_param <- list(
+  detectlowvalue = T, 
+  detectNA = T, 
+  threshold = 0.99
+)
+penda_simu_param <- list(
+  size_grp = 100,
+  quant_simu = 0.05
+)
+penda_L_H_params <- list(
+  threshold = 0.99, 
+  s_max = 30
+)
+penda_quantile_param <- list(
+  quantile_values = c(0, 0.01, 0.02, 0.03, 0.05, 0.06, 0.08, 0.1, 0.15, 0.2, 0.3, 0.4),
+  factor_values = c(1, 1.2, 1.4)
+)
+penda_threshold_param <- list(
+  threshold_values = c(0.01, 0.05, 0.1, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
+  iterations = 30
+)
+rerun_cache <- F
+result_dir <- "Result_tcga_define_optimal_param/"
+```
+
+```{r prepare-count-data}
+# The matrix was prepared beforehand, we just need to the txt file
+count_data <- read.table("Data/TCGA-GBM-v32.0/count_matrix.txt", header = T, sep = "\t", as.is = T, row.names = 1, check.names = F)
+count_data <- count_data[isUnique(count_data$gene_name),]
+row.names(count_data) <- count_data$gene_name
+count_data <- count_data[,-1]
+count_metadata <- read.table("Data/TCGA-GBM-v32.0/gdc_sample_sheet.2022-07-18.tsv", header = T, as.is = T, sep = "\t", check.names = F)
+names(count_metadata) <- c("file_id",	"file_name", "data_category", "data_type", "project_id", "case_id", "sample_id", "sample_type")
+count_metadata$condition <- "tumor"
+index_normal <- grep("solid", count_metadata$sample_type, ignore.case = T, perl = T)
+count_metadata$condition[index_normal] <- "solid_tissue_normal"
+count_metadata$condition <- as.factor(count_metadata$condition)
+```
+
+```{r make-data}
+dds <- DESeqDataSetFromMatrix(
+  countData = count_data, 
+  colData = count_metadata, 
+  design = ~condition
+)
+dds <- DESeq(dds)
+pld <- normTransform(dds)
+normalized_count <- assay(pld, blind = F)
+control_index <- which(count_metadata$condition == "control")
+control_names <- colnames(normalized_count)[control_index]
+all_data <- as.matrix(normalized_count)
+```
+
+Here we prepare several PenDA datasets to perform crossed-validation.
+We don't have enough controls so we use this approach to ensure the quality of the Differential Expression analysis.
+
+```{r make-penda-datasets}
+simulated_cases <- lapply(control_names, function(x){x})
+
+all_penda_datasets <- xfun::cache_rds({
+  with(penda_datasets_param, {
+    lapply(1:length(simulated_cases), function(i){
+      data_simu <- simulated_cases[[i]]
+      names_ctrl_set <- control_names[!(control_names %in% data_simu)]
+      index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
+      cases <- all_data[,-control_index]
+      ctrl <- all_data[,index_ctrl_set]
+      penda::make_dataset(ctrl, cases, detectlowvalue = T, detectNA = T, threshold = 0.99)
+    })
+  })
+}, rerun = rerun_cache, file = "all_penda_datasets.rds", dir = result_dir)
+
+all_simulated_datasets <- xfun::cache_rds({
+  lapply(1:length(simulated_cases), function(i){
+      data_simu <- simulated_cases[[i]]
+      data_ctrl <- all_penda_datasets[[i]]$data_ctrl
+      all_data[row.names(data_ctrl),data_simu]
+    })
+}, rerun = rerun_cache, file = "all_penda_simulated_datasets.rds", dir = result_dir)
+```
+
+```{r compute-L-H-lists}
+all_L_H_list <- with(penda_L_H_params, {
+  lapply(all_penda_datasets, function(penda_dataset){
+    penda::compute_lower_and_higher_lists(penda_dataset$data_ctrl, threshold = threshold, s_max = s_max)
+  })
+})
+```
+
+```{r generate-simulatd-datasets}
+all_simulation <- xfun::cache_rds({
+  with(penda_simu_param, {
+    lapply(1:length(all_simulated_datasets), function(i){
+      data_ctrl <- all_penda_datasets[[i]]$data_ctrl
+      data_cases <- all_penda_datasets[[i]]$data_case
+      data_simu <- all_simulated_datasets[[i]]
+      penda::complex_simulation(data_ctrl, data_cases, data_simu, size_grp, quant_simu)
+    })
+  })
+}, rerun = rerun_cache, file = "all_simulation.rds", dir = result_dir)
+```
+
+# Find Optimal Quantiles
+
+```{r choose-quantiles, results='hide'}
+all_which_quantiles <- xfun::cache_rds({
+  with(penda_quantile_param, {
+    lapply(1:length(all_simulation), function(i){
+      data_ctrl <- all_penda_datasets[[i]]$data_ctrl
+      data_cases <- all_penda_datasets[[i]]$data_case
+      data_simu <- all_simulation[[i]]
+      penda::choose_quantile(data_ctrl, data_simu, factor_values = factor_values, quantile_values = quantile_values)
+    })
+  })
+}, rerun = rerun_cache, file = "all_which_quantiles.rds", dir = result_dir)
+```
+
+```{r optimal-quantiles}
+all_best_quantile <- lapply(all_which_quantiles, function(which_quantile){
+  penda::select_quantile_param(which_quantile, FDR_max = 0.1)
+})
+
+df_quant <- purrr::imap_dfr(all_which_quantiles, function(which_quantile, simu_nb){
+  data.frame(
+    factor = factor(which_quantile[,1]),
+    quantile = factor(which_quantile[,2]),
+    FDR = which_quantile[,3],
+    TPR = which_quantile[,4],
+    simu_dataset = simu_nb
+  )
+})
+
+df_best_quantile <- purrr::imap_dfr(all_best_quantile, function(best_quantile, i){
+  data.frame(factor = best_quantile$factor, quantile = best_quantile$quantile, FDR = best_quantile$FDR, TPR = best_quantile$TPR, simu_dataset = i, row.names = NULL)
+})
+df_best_quantile
+```
+
+
+```{r plot-optimal-quantiles, echo = FALSE}
+best_quantile <- df_best_quantile[which.min(df_best_quantile$FDR),]
+
+plot_optimal_quantiles <- ggplot(df_quant, aes(x = FDR, y = TPR, color = quantile, group = factor, shape = factor)) + geom_point() + 
+  geom_line() + theme_minimal() +
+  geom_vline(xintercept = best_quantile$FDR, linetype = "dotted")  +
+  geom_hline(yintercept = best_quantile$TPR, linetype = "dotted")
+
+plot_optimal_quantiles
+```
+
+# Find Optimal Threshold
+
+```{r choose-thresholds, results='hide'}
+all_which_threshold <- xfun::cache_rds({
+  with(penda_threshold_param,{
+    lapply(1:length(all_best_quantile), function(i){
+      data_ctrl <- all_penda_datasets[[i]]$data_ctrl
+      best_quant <- all_best_quantile[[i]]
+      L_H_list <- all_L_H_list[[i]]
+      simulation <- all_simulation[[i]]
+      best_quant = best_quantile$quantile
+      best_fact = best_quantile$factor
+      penda::choose_threshold(data_ctrl, L_H_list, iterations, simulation, threshold_values, quant_test = best_quant, factor_test = best_fact)
+    })
+  })
+}, rerun = rerun_cache, file = "all_which_threshold.rds", dir = result_dir)
+
+```
+
+```{r optimal-thresholds, message=FALSE}
+all_best_threshold <- lapply(all_which_threshold, function(which_threshold){
+  penda::select_threshold_param(which_threshold, FDR_max = 0.05)
+})
+
+df_which_threshold <- purrr::imap_dfr(all_which_threshold, function(which_threshold, i){
+  which_threshold = apply(which_threshold, 2, as.numeric)
+  if(length(unique(which_threshold[,1])) > 1){
+    results_threshold = c()
+    for(value in unique(which_threshold[,2])){
+      sum_value = colSums(which_threshold[which_threshold[,"threshold"] == value, ])
+      results_threshold = rbind(results_threshold, c(value, sum_value[c(6, 7, 8, 9)]))
+    }
+  } else {
+    results_threshold = which_threshold[, c(2, 6, 7, 8, 9)]
+  }
+  
+  df = data.frame(threshold = as.factor(results_threshold[,1]),
+                  FDR = results_threshold[,"FP"] / (results_threshold[,"TP"] + results_threshold[,"FP"]), 
+                  TPR  = results_threshold[,"TP"] / (results_threshold[,"TP"] + results_threshold[,"FN"]),
+                  simu_datasets = i)
+})
+
+df_best_threshold <- purrr::imap_dfr(all_best_threshold, function(best_threshold, i){
+  data.frame(
+    threshold = best_threshold$threshold,
+    FDR = best_threshold$FDR,
+    TPR = best_threshold$TPR,
+    FPR = best_threshold$FPR,
+    simu_dataset = i, 
+    row.names = NULL
+  )
+})
+df_best_threshold
+```
+
+```{r plot-optimal-thresholds, echo=FALSE}
+best_threshold <- df_best_threshold[which.min(df_best_threshold$FDR), ]
+  
+plot_optimal_thresholds <- ggplot(df_which_threshold, aes(x = FDR, y = TPR, color = threshold, group = simu_datasets)) +
+  geom_point() + geom_line() + theme_minimal() +
+  geom_vline(xintercept = best_threshold$FDR, linetype = "dotted")  +
+  geom_hline(yintercept = best_threshold$TPR, linetype = "dotted")   
+plot_optimal_thresholds
+```
+
+# Parameter Values
+```{r print-param}
+validation_datasets_param
+penda_datasets_param
+penda_simu_param
+penda_L_H_params
+penda_quantile_param
+penda_threshold_param
+rerun_cache
+result_dir
+```
+
+```{r save-session, show=FALSE}
+save.image("tcga_define_optimal_param.RData")
+```

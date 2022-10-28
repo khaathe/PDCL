@@ -19,13 +19,13 @@ library(purrr)
 library(plotly)
 
 # Source files with functions used in next steps
-source("R/gprofiler-analysis.R")
-source("R/gsea-analysis.R")
-source("R/process-result.R")
-source("R/quickgo.R")
-source("R/kegg.R")
-source("R/kegg.R")
-source("R/reactome.R")
+source("~/PhD/Project/PDCL/R/gprofiler-analysis.R")
+source("~/PhD/Project/PDCL/R/gsea-analysis.R")
+source("~/PhD/Project/PDCL/R/process-result.R")
+source("~/PhD/Project/PDCL/R/quickgo.R")
+source("~/PhD/Project/PDCL/R/kegg.R")
+source("~/PhD/Project/PDCL/R/kegg.R")
+source("~/PhD/Project/PDCL/R/reactome.R")
 
 # Constant
 result_dir <- "Result_tcga_enrichment/"
@@ -61,8 +61,8 @@ prepare.count.matrix <- function(expr.dir, metadata.file){
 
 ```{r define-gmt-path, echo = TRUE}
 gmt_path <- list(
-  reactome = "Data/gene-set/reactome_no_less_15_no_more_500.gmt",
-  kegg = "Data/gene-set/kegg_no_less_15_no_more_500.gmt"
+  reactome = "~/PhD/Project/PDCL/Data/gene-set/reactome_no_less_15_no_more_500.gmt",
+  kegg = "~/PhD/Project/PDCL/Data/gene-set/kegg_no_less_15_no_more_500.gmt"
 )
 ```
 
@@ -88,11 +88,11 @@ gprofiler_gmt_list <- lapply(gmt_path, function(x){ upload_GMT_file(x) })
 
 ```{r prepare-count-data}
 # The matrix was prepared beforehand, we just need to the txt file
-count_data <- read.table("Data/TCGA-GBM-v32.0/count_matrix.txt", header = T, sep = "\t", as.is = T, row.names = 1, check.names = F)
+count_data <- read.table("~/PhD/Project/PDCL/Data/TCGA-GBM-v32.0/count_matrix.txt", header = T, sep = "\t", as.is = T, row.names = 1, check.names = F)
 count_data <- count_data[isUnique(count_data$gene_name),]
 row.names(count_data) <- count_data$gene_name
 count_data <- count_data[,-1]
-count_metadata <- read.table("Data/TCGA-GBM-v32.0/gdc_sample_sheet.2022-07-18.tsv", header = T, as.is = T, sep = "\t", check.names = F)
+count_metadata <- read.table("~/PhD/Project/PDCL/Data/TCGA-GBM-v32.0/gdc_sample_sheet.2022-07-18.tsv", header = T, as.is = T, sep = "\t", check.names = F)
 names(count_metadata) <- c("file_id",	"file_name", "data_category", "data_type", "project_id", "case_id", "sample_id", "sample_type")
 count_metadata$condition <- "tumor"
 index_normal <- grep("solid", count_metadata$sample_type, ignore.case = T, perl = T)
@@ -258,7 +258,7 @@ common_pathway_id <- all_enrich_collapsed %>%
 ```
 
 ```{r map-go-ids}
-id2go <- read.table("Data/gene-set/id2go.txt", sep = "\t", header = T, as.is = T)
+id2go <- read.table("~/PhD/Project/PDCL/Data/gene-set/id2go.txt", sep = "\t", header = T, as.is = T)
 common_go_ids <- id2go %>% dplyr::filter(source_id %in% common_pathway_id) %>% pull(go_id)
 ```
 
@@ -370,13 +370,13 @@ count_enrich_pathways
 <!-- Retrieve Categories for enriched pathways -->
 
 ```{r kegg-categories, cache=TRUE}
-kegg_gs_metadata <- read.csv("Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
+kegg_gs_metadata <- read.csv("~/PhD/Project/PDCL/Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
 kegg_categories <- factor(kegg_gs_metadata$category, levels = KEGG_TOP_CATEGORIES)
 names(kegg_categories) <- kegg_gs_metadata$pathway_id
 ```
 
 ```{r reactome-categories, cache=TRUE}
-react_gs_metadata <- read.csv("Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
+react_gs_metadata <- read.csv("~/PhD/Project/PDCL/Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
 react_categories <- factor(react_gs_metadata$category, levels = REACTOME_TOP_LEVEL_PATHWAYS)
 names(react_categories) <- react_gs_metadata$pathway_id
 ```
@@ -423,5 +423,5 @@ DT::datatable(
 
 
 ```{r save-session, show=FALSE}
-save.image("~/PhD/PDCL/tcga_enrichment.RData")
+save.image("tcga_enrichment.RData")
 ```

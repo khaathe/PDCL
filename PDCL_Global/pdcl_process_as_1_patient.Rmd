@@ -9,7 +9,6 @@ output:
 
 ```{r setup, include=FALSE}
 library(flexdashboard)
-knitr::opts_chunk$set(cache=TRUE)
 
 # Load required libraries (others are load directly in sourced files)
 library(DESeq2)
@@ -18,15 +17,15 @@ library(purrr)
 library(plotly)
 
 # Source files with functions used in next steps
-source("R/gprofiler-analysis.R")
-source("R/gsea-analysis.R")
-source("R/process-result.R")
-source("R/quickgo.R")
-source("R/kegg.R")
-source("R/reactome.R")
+source("~/PhD/Project/PDCL/R/gprofiler-analysis.R")
+source("~/PhD/Project/PDCL/R/gsea-analysis.R")
+source("~/PhD/Project/PDCL/R/process-result.R")
+source("~/PhD/Project/PDCL/R/quickgo.R")
+source("~/PhD/Project/PDCL/R/kegg.R")
+source("~/PhD/Project/PDCL/R/reactome.R")
 
 # Constant
-result_dir <- "~/PhD/PDCL/Result_pdcl_process_as_1_patient/"
+result_dir <- "Result_pdcl_process_as_1_patient/"
 ```
 
 # Data Loading
@@ -34,7 +33,7 @@ result_dir <- "~/PhD/PDCL/Result_pdcl_process_as_1_patient/"
 Load controls
 
 ```{r load-controls, echo = TRUE}
-control_file <- "Data/PDCL/astrocyte_GSE109001_counts_unique_genes_samples_filtered.txt"
+control_file <- "~/PhD/Project/PDCL/Data/PDCL/astrocyte_GSE109001_counts_unique_genes_samples_filtered.txt"
 control <- read.table(
   control_file, 
   header = T, 
@@ -63,7 +62,7 @@ Load the PDCL count table. Disabled check.names otherwise it will add a X at the
 
 ```{r load-pdcl, echo = TRUE}
 pdcl_count_table <- read.table(
-  "/home/spinicck/PhD/Data/PDCL/lignees_count_genes_PDCL.txt", 
+  "~/PhD/Project/PDCL/Data/PDCL/lignees_count_genes_PDCL.txt", 
   sep = "\t", 
   header = T, 
   as.is = "gene_id", 
@@ -97,7 +96,7 @@ pdcl_names <- c(
 Load PENDA results
 
 ```{r load-penda, echo = TRUE}
-penda_res <- readRDS("Data/PDCL/results_penda_astrocytes_2021.rds")
+penda_res <- readRDS("~/PhD/Project/PDCL/Data/PDCL/results_penda_astrocytes_2021.rds")
 penda_res <- as.data.frame(penda_res)
 penda_pdcl_names <- names(penda_res)
 # Remove ".genes.results" string in the column names
@@ -109,8 +108,8 @@ Define GMT path
 
 ```{r define-gmt-path, echo = TRUE}
 gmt_path <- list(
-  reactome = "Data/gene-set/reactome_no_less_15_no_more_500.gmt",
-  kegg = "Data/gene-set/kegg_no_less_15_no_more_500.gmt"
+  reactome = "~/PhD/Project/PDCL/Data/gene-set/reactome_no_less_15_no_more_500.gmt",
+  kegg = "~/PhD/Project/PDCL/Data/gene-set/kegg_no_less_15_no_more_500.gmt"
 )
 ```
 
@@ -354,7 +353,7 @@ common_pathway_id <- all_enrich_collapsed %>%
 ```
 
 ```{r download-go-chart}
-id2go <- read.table("Data/gene-set/id2go.txt", sep = "\t", header = T, as.is = T)
+id2go <- read.table("~/PhD/Project/PDCL/Data/gene-set/id2go.txt", sep = "\t", header = T, as.is = T)
 common_go_ids <- id2go %>% dplyr::filter(source_id %in% common_pathway_id) %>% pull(go_id)
 
 # Download GO chart for common GO IDs
@@ -469,14 +468,14 @@ count_enrich_pathways
 ### Number of Enriched Kegg Categories
 <!-- Retrieve Categories for enriched pathways -->
 
-```{r kegg-categories, cache=TRUE}
-kegg_gs_metadata <- read.csv("Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
+```{r kegg-categories}
+kegg_gs_metadata <- read.csv("~/PhD/Project/PDCL/Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
 kegg_categories <- factor(kegg_gs_metadata$category, levels = KEGG_TOP_CATEGORIES)
 names(kegg_categories) <- kegg_gs_metadata$pathway_id
 ```
 
-```{r reactome-categories, cache=TRUE}
-react_gs_metadata <- read.csv("Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
+```{r reactome-categories}
+react_gs_metadata <- read.csv("~/PhD/Project/PDCL/Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
 react_categories <- factor(react_gs_metadata$category, levels = REACTOME_TOP_LEVEL_PATHWAYS)
 names(react_categories) <- react_gs_metadata$pathway_id
 ```
@@ -527,5 +526,5 @@ DT::datatable(
 ![Gene Ontology Map](Result_pdcl_process_as_1_patient/plot/common_pathways_go_chart.png)
 
 ```{r save-session, show=FALSE}
-save.image("~/PhD/PDCL/pdcl_process_as_1_patient.RData")
+save.image("pdcl_process_as_1_patient.RData")
 ```
