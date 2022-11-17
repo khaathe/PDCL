@@ -21,12 +21,12 @@ library(factoextra)
 library(penda)
 
 # Source files with functions used in next steps
-source("R/gprofiler-analysis.R")
-source("R/gsea-analysis.R")
-source("R/process-result.R")
-source("R/quickgo.R")
-source("R/kegg.R")
-source("R/reactome.R")
+source("~/PhD/Project/PDCL/Code/R/gprofiler-analysis.R")
+source("~/PhD/Project/PDCL/Code/R/gsea-analysis.R")
+source("~/PhD/Project/PDCL/Code/R/process-result.R")
+source("~/PhD/Project/PDCL/Code/R/quickgo.R")
+source("~/PhD/Project/PDCL/Code/R/kegg.R")
+source("~/PhD/Project/PDCL/Code/R/reactome.R")
 
 # Constant
 rerun_rds_cached <- FALSE
