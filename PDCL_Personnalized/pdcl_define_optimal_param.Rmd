@@ -1,5 +1,7 @@
 ---
 title: "PDCL : Define Optimal Parameters"
+author: "Kévin SPINICCI"
+date: "`r Sys.Date()`"
 output: 
   html_document:
     toc: true
@@ -60,9 +62,23 @@ rerun_cache <- F
 result_dir <- "Result_pdcl_define_optimal_param/"
 ```
 
+# Introduction 
+
+This RMarkdown document is intended to find the optimal parameters to conduct a PenDA differential analysis.
+Here we will do :
+  * Normalization of count data following the Pseudo-Log method of the DESeq2 package
+  * PCA on the normalized count value
+  * Visualization of the density of the normalized count
+  * Filtering the data using the `penda::make_dataset` method
+  * Rank the genes with their relative ordering in the controls
+  * Assess the FDR/TPR for different factors and quantiles (when PenDA cannot use the Lower-Higher list)
+  * Assess the FDR/TPR for different thresholds (PenDA differential testing)
+
 # Dataset and Data Filtering
 
 ## Prepare Count-Data
+
+Here we create a count table with all the samples in it (controls and tumours) with the associated metadata.
 
 ```{r prepare-count-data}
 control_count_data <- read.csv(PDCL_DATASET_PARAM$control_count_path)
@@ -81,14 +97,14 @@ sample <- gsub("^(.*)_(Br\\d.*)", "\\1", colnames(count_data), ignore.case = T, 
 # sample[(length(control_names)+1):length(sample)] <- "gbm"
 replicate <- gsub("^(.*)_(Br\\d.*)", "\\2", colnames(count_data), ignore.case = T, perl = T, fixed = F)
 count_metadata <- data.frame(
-  sample = as.factor(sample),
-  replicate = as.factor(replicate),
   condition = as.factor(condition_vect),
   row.names = colnames(count_data)
 )
 ```
 
 ## Pseudo-log Normalization
+
+Here we create a `DESeqDataSet` object to perform the Pseudo-Log Normlization.
 
 ```{r make-data}
 dds <- DESeqDataSetFromMatrix(
@@ -170,6 +186,8 @@ all_simulated_datasets <- xfun::cache_rds({
 
 ## Relative gene ordering
 
+We compute the Lower/Higher list for each datasets for later PenDA test.
+
 ```{r compute-L-H-lists}
 all_L_H_list <- with(penda_L_H_params, {
   BiocParallel::bplapply(all_penda_datasets, function(penda_dataset){
@@ -179,6 +197,9 @@ all_L_H_list <- with(penda_L_H_params, {
 ```
 
 ## Generation of simulated datasets
+
+Here we use the `penda::complex_simulation` function to simulate a dataset with 
+cancer deregulation.
 
 ```{r generate-simulatd-datasets}
 all_simulation <- xfun::cache_rds({
@@ -197,6 +218,9 @@ all_simulation <- xfun::cache_rds({
 
 ## Define optimal parameters for quantile method
 
+Here we run the quantile test for each simulated datasets so we can assess the
+FDR/TPR and find the best parameters for this method.
+
 ```{r choose-quantiles, message=FALSE}
 all_which_quantiles <- xfun::cache_rds({
   with(penda_quantile_param, {
@@ -210,11 +234,9 @@ all_which_quantiles <- xfun::cache_rds({
 }, rerun = rerun_cache, file = "all_which_quantiles.rds", dir = result_dir)
 ```
 
-<!-- 
-  Suppress warnings that indicate the FDR is not reachable because we know it 
-  from the DF of best quantile.
--->
 ```{r optimal-quantiles, message=FALSE, warning=FALSE, echo=FALSE}
+# Suppress warnings that indicate the FDR is not reachable because we know it 
+# from the DF of best quantile.
 all_best_quantile <- with(penda_quantile_param, {
    lapply(all_which_quantiles, function(which_quantile){
      penda::select_quantile_param(which_quantile, FDR_max = FDR_max)
@@ -253,17 +275,20 @@ plot_optimal_quantiles
 
 ## Define optimal parameters for PenDA method
 
+Here we run the PenDA test for each simulated datasets so we can assess the
+FDR/TPR and find the best parameters for this method.
+
 ```{r choose-thresholds, message=FALSE}
 all_which_threshold <- xfun::cache_rds({
   with(penda_threshold_param,{
     BiocParallel::bplapply(1:length(all_best_quantile), function(i){
       data_ctrl <- all_penda_datasets[[i]]$data_ctrl
-      best_quant <- all_best_quantile[[i]]
+      best_quantile <- all_best_quantile[[i]]
       L_H_list <- all_L_H_list[[i]]
       simulation <- all_simulation[[i]]
-      best_quant = best_quantile$quantile
-      best_fact = best_quantile$factor
-      penda::choose_threshold(data_ctrl, L_H_list, iterations, simulation, threshold_values, quant_test = best_quant, factor_test = best_fact)
+      quant_test = best_quantile$quantile
+      factor_test = best_quantile$factor
+      penda::choose_threshold(data_ctrl, L_H_list, iterations, simulation, threshold_values, quant_test = quant_test, factor_test = factor_test)
     })
   })
 }, rerun = rerun_cache, file = "all_which_threshold.rds", dir = result_dir)
