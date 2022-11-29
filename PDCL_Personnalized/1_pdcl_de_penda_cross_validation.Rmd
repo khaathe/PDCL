@@ -1,5 +1,5 @@
 ---
-title: "Cross Validation Penda on PDCL"
+title: "1 - Differential Expression : PenDA with Cross Validation on PDCL"
 output: 
   html_document:
     toc: TRUE
@@ -41,12 +41,13 @@ penda_test_param <- list(
   factor_test = 1.6
 )
 rerun_cache <- T 
-result_dir = "Result_pdcl_cross_validation/"
+result_dir = "Result_1_pdcl_de_penda_cross_validation/"
 ```
 
 # Dataset and Data Filtering
 
 ## Prepare Count-Data
+
 ```{r prepare-count-data}
 control_count_data <- read.csv(PDCL_DATASET_PARAM$control_count_path)
 pdcl_count_data <- read.csv(PDCL_DATASET_PARAM$pdcl_count_path, check.names = F)
@@ -159,7 +160,7 @@ all_L_H_list <- with(penda_L_H_params, {
 
 We hide the results of this chunck because it will overload the doc with unnecessary comments.
 
-```{r run-penda, results='hide'}
+```{r run-penda, message=FALSE}
 all_penda_res <- xfun::cache_rds({
   with(penda_test_param, {
     lapply(1:length(all_penda_datasets), function(i){
@@ -219,7 +220,7 @@ plot_common_dereg_percent <- ggplot(data, aes(x = run, y = percent, colour = der
 plot_common_dereg_percent
 ```
 
-```{r dereg-perecent, fig.width=12, fig.height=8}
+```{r dereg-perecent}
 dereg_percentage <- purrr::imap_dfr(all_penda_res, function(penda_res, run){
   up <- colSums(penda_res$up_genes)/nrow(penda_res$up_genes)
   down <- colSums(penda_res$down_genes)/nrow(penda_res$down_genes)
@@ -240,6 +241,7 @@ plot_dereg_percent_tumour <- ggplot(data, aes(x = run, y = percent, colour = der
   geom_point() +
   geom_hline(yintercept = c(0.05, 0.1, 0.3, 0.5), colour = "grey", linetype = "dashed") +
   ylim(c(0,1))
+
 plot_dereg_percent_tumour
 ```
 
@@ -255,12 +257,14 @@ plot_dereg_percent_control <- ggplot(data, aes(x = run, y = percent, colour = de
   geom_point() +
   geom_hline(yintercept = c(0.05, 0.1), colour = c("red", "blue"), linetype = "dotted") +
   ylim(c(0,1))
+
 plot_dereg_percent_control
 ```
 
 # Run information
 
 ## Parameter Values
+
 ```{r print-param}
 validation_datasets_param
 penda_datasets_param
@@ -277,5 +281,5 @@ sessionInfo()
 ```
 
 ```{r save-image, include=FALSE}
-save.image("pdcl_cross_validation.RData")
+save.image("1_pdcl_de_penda_cross_validation.RData")
 ```

@@ -1,5 +1,5 @@
 ---
-title: "PDCL_process_personalized"
+title: "2 - Personnalized Pathway Enrichment on PDCL"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
@@ -28,7 +28,7 @@ source("~/PhD/Project/PDCL/Code/R/reactome.R")
 
 # Constant
 rerun_rds_cached <- FALSE
-result_dir <- "Result_pdcl_process_personnalized/"
+result_dir <- "Result_2_pdcl_enrichment_personnalized/"
 ```
 
 ```{r function}
@@ -499,5 +499,5 @@ plot_contrig_pca_kegg
 
 
 ```{r save-session}
-save.image("pdcl_process_personalized.RData")
+save.image("2_pdcl_enrichment_personnalized.RData")
 ```
