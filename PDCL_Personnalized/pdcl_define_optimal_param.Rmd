@@ -2,8 +2,8 @@
 title: "PDCL : Define Optimal Parameters"
 output: 
   html_document:
-    toc: TRUE
-    toc_float: TRUE
+    toc: true
+    toc_float: true
 ---
 
 ```{r setup, include=FALSE}
@@ -11,12 +11,11 @@ output:
 library(Biobase)
 library(dplyr)
 library(purrr)
-library(plotly)
-library(DT)
-library(mclust)
-library(factoextra)
 library(penda)
 library(DESeq2)
+library(BiocParallel)
+
+knitr::opts_knit$set(root.dir = "~/PhD/Project/PDCL/TCGA-GBM_Personnalized/")
 
 # Source files with functions used in next steps
 source("~/PhD/Project/PDCL/Code/R/pdcl-dataset.R")
@@ -26,6 +25,9 @@ source("~/PhD/Project/PDCL/Code/R/quickgo.R")
 source("~/PhD/Project/PDCL/Code/R/kegg.R")
 source("~/PhD/Project/PDCL/Code/R/reactome.R")
 
+multicoreParam <- BiocParallel::MulticoreParam(workers = 1)
+register(multicoreParam)
+
 validation_datasets_param <- list(
   nb_validation_run = 10,
   nb_validation_ctrl = 2
@@ -33,7 +35,9 @@ validation_datasets_param <- list(
 penda_datasets_param <- list(
   detectlowvalue = T, 
   detectNA = T, 
-  threshold = 0.99
+  threshold = 0.99,
+  val_min = NA,
+  bimod = F
 )
 penda_simu_param <- list(
   size_grp = 100,
@@ -41,34 +45,28 @@ penda_simu_param <- list(
 )
 penda_L_H_params <- list(
   threshold = 0.99, 
-  s_max = 100
+  s_max = 100 
 )
 penda_quantile_param <- list(
-  quantile_values = seq(0, 1, by = 0.05),
+  quantile_values = seq(0, 1.0, by = 0.05),
   factor_values = seq(1, 2, by = 0.1),
   FDR_max = 0.05
 )
 penda_threshold_param <- list(
-  threshold_values = c(0.01, seq(0.05, 1.2, by = 0.05)),
+  threshold_values = seq(0.0, 1.0, by = 0.05),
   iterations = 10
 )
 rerun_cache <- T 
-result_dir = "Result_pdcl_define_optim_param/"
+result_dir <- "Result_pdcl_define_optimal_param/"
 ```
 
-# Prepare data
-
 ```{r prepare-count-data}
-control_count_data <- read.table(PDCL_DATASET_PARAM$control_count_path, header = T, sep = "\t", as.is = c("id", "symbol") )
-control_count_data <- control_count_data[, colnames(control_count_data) %in% c("id", "symbol", PDCL_DATASET_PARAM$control_sample_names)]
-pdcl_count_data <- read.table(PDCL_DATASET_PARAM$pdcl_count_path, sep = "\t", header = T, as.is = "gene_id", check.names = F)
-
+control_count_data <- read.csv(PDCL_DATASET_PARAM$control_count_path)
+pdcl_count_data <- read.csv(PDCL_DATASET_PARAM$pdcl_count_path, check.names = F)
 # Merge control and PDCL counts into one dataframe
 count_data <- merge(control_count_data, pdcl_count_data, by.x = "symbol", by.y = "gene_id")
-
 # Associate each row with a gene symbol
 row.names(count_data) <- count_data$symbol
-
 # Remove symbol and id columns
 count_data <- count_data %>% dplyr::select(!c(symbol, id))
 condition_vect <- c(
@@ -76,6 +74,7 @@ condition_vect <- c(
   rep("pdcl", length(PDCL_DATASET_PARAM$pdcl_sample_names))
 )
 sample <- gsub("^(.*)_(Br\\d.*)", "\\1", colnames(count_data), ignore.case = T, perl = T, fixed = F)
+# sample[(length(control_names)+1):length(sample)] <- "gbm"
 replicate <- gsub("^(.*)_(Br\\d.*)", "\\2", colnames(count_data), ignore.case = T, perl = T, fixed = F)
 count_metadata <- data.frame(
   sample = as.factor(sample),
@@ -99,27 +98,30 @@ control_names <- colnames(normalized_count)[control_index]
 all_data <- as.matrix(normalized_count)
 ```
 
-Here we prepare several PenDA datasets to perform crossed-validation.
-We don't have enough controls so we use this approach to ensure the quality of the Differential Expression analysis.
+Here we prepare several PenDA datasets to perform crossed-validation. We don't have enough controls so we use this approach to ensure the quality of the Differential Expression analysis.
 
 ```{r make-penda-datasets}
 simulated_cases <- lapply(control_names, function(x){x})
 
+# simulated_cases <- combn(control_names, validation_datasets_param$nb_validation_ctrl, simplify = F)
+# simulated_index <- sample(1:length(simulated_cases), validation_datasets_param$nb_validation_run)
+# simulated_cases <- simulated_cases[simulated_index]
+
 all_penda_datasets <- xfun::cache_rds({
   with(penda_datasets_param, {
-    lapply(1:length(simulated_cases), function(i){
+    BiocParallel::bplapply(1:length(simulated_cases), function(i){
       data_simu <- simulated_cases[[i]]
       names_ctrl_set <- control_names[!(control_names %in% data_simu)]
       index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
       cases <- all_data[,-control_index]
       ctrl <- all_data[,index_ctrl_set]
-      penda::make_dataset(ctrl, cases, detectlowvalue = T, detectNA = T, threshold = 0.99)
+      penda::make_dataset(ctrl, cases, detectlowvalue = detectlowvalue, detectNA = detectNA, threshold = threshold, val_min = val_min, bimod = bimod)
     })
   })
 }, rerun = rerun_cache, file = "all_penda_datasets.rds", dir = result_dir)
 
 all_simulated_datasets <- xfun::cache_rds({
-  lapply(1:length(simulated_cases), function(i){
+  BiocParallel::bplapply(1:length(simulated_cases), function(i){
       data_simu <- simulated_cases[[i]]
       data_ctrl <- all_penda_datasets[[i]]$data_ctrl
       all_data[row.names(data_ctrl),data_simu]
@@ -129,7 +131,7 @@ all_simulated_datasets <- xfun::cache_rds({
 
 ```{r compute-L-H-lists}
 all_L_H_list <- with(penda_L_H_params, {
-  lapply(all_penda_datasets, function(penda_dataset){
+  BiocParallel::bplapply(all_penda_datasets, function(penda_dataset){
     penda::compute_lower_and_higher_lists(penda_dataset$data_ctrl, threshold = threshold, s_max = s_max)
   })
 })
@@ -138,7 +140,7 @@ all_L_H_list <- with(penda_L_H_params, {
 ```{r generate-simulatd-datasets}
 all_simulation <- xfun::cache_rds({
   with(penda_simu_param, {
-    lapply(1:length(all_simulated_datasets), function(i){
+    BiocParallel::bplapply(1:length(all_simulated_datasets), function(i){
       data_ctrl <- all_penda_datasets[[i]]$data_ctrl
       data_cases <- all_penda_datasets[[i]]$data_case
       data_simu <- all_simulated_datasets[[i]]
@@ -153,7 +155,7 @@ all_simulation <- xfun::cache_rds({
 ```{r choose-quantiles, results='hide'}
 all_which_quantiles <- xfun::cache_rds({
   with(penda_quantile_param, {
-    lapply(1:length(all_simulation), function(i){
+    BiocParallel::bplapply(1:length(all_simulation), function(i){
       data_ctrl <- all_penda_datasets[[i]]$data_ctrl
       data_cases <- all_penda_datasets[[i]]$data_case
       data_simu <- all_simulation[[i]]
@@ -169,6 +171,7 @@ all_best_quantile <- with(penda_quantile_param, {
      penda::select_quantile_param(which_quantile, FDR_max = FDR_max)
    })
 })
+
 df_quant <- purrr::imap_dfr(all_which_quantiles, function(which_quantile, simu_nb){
   data.frame(
     factor = factor(which_quantile[,1]),
@@ -185,14 +188,16 @@ df_best_quantile <- purrr::imap_dfr(all_best_quantile, function(best_quantile, i
 df_best_quantile
 ```
 
-
 ```{r plot-optimal-quantiles, echo = FALSE}
 best_quantile <- df_best_quantile[which.min(df_best_quantile$FDR),]
 
 plot_optimal_quantiles <- ggplot(df_quant, aes(x = FDR, y = TPR, color = quantile, group = factor, shape = factor)) + geom_point() + 
-  geom_line() + theme_minimal() +
+  geom_line() + 
+  theme_minimal() +
   geom_vline(xintercept = best_quantile$FDR, linetype = "dotted")  +
-  geom_hline(yintercept = best_quantile$TPR, linetype = "dotted")
+  geom_hline(yintercept = best_quantile$TPR, linetype = "dotted") +
+  xlim(0.0, 1.0) +
+  ylim(0.0, 1.0)
 
 plot_optimal_quantiles
 ```
@@ -202,7 +207,7 @@ plot_optimal_quantiles
 ```{r choose-thresholds, results='hide'}
 all_which_threshold <- xfun::cache_rds({
   with(penda_threshold_param,{
-    lapply(1:length(all_best_quantile), function(i){
+    BiocParallel::bplapply(1:length(all_best_quantile), function(i){
       data_ctrl <- all_penda_datasets[[i]]$data_ctrl
       best_quant <- all_best_quantile[[i]]
       L_H_list <- all_L_H_list[[i]]
@@ -263,6 +268,7 @@ plot_optimal_thresholds
 ```
 
 # Parameter Values
+
 ```{r print-param}
 validation_datasets_param
 penda_datasets_param
