@@ -19,12 +19,12 @@ library(BiocParallel)
 library(factoextra)
 
 # Source files with functions used in next steps
-source("~/PhD/Project/PDCL/Code/R/pdcl-dataset.R")
-source("~/PhD/Project/PDCL/Code/R/gprofiler-analysis.R")
-source("~/PhD/Project/PDCL/Code/R/process-result.R")
-source("~/PhD/Project/PDCL/Code/R/quickgo.R")
-source("~/PhD/Project/PDCL/Code/R/kegg.R")
-source("~/PhD/Project/PDCL/Code/R/reactome.R")
+source("../Code/R/pdcl-dataset.R")
+source("../Code/R/gprofiler-analysis.R")
+source("../Code/R/process-result.R")
+source("../Code/R/quickgo.R")
+source("../Code/R/kegg.R")
+source("../Code/R/reactome.R")
 
 multicoreParam <- BiocParallel::MulticoreParam(workers = 1)
 register(multicoreParam)
@@ -59,7 +59,7 @@ penda_threshold_param <- list(
   FDR_max = 0.05
 )
 rerun_cache <- F 
-result_dir <- "Result_pdcl_define_optimal_param/"
+result_dir <- "Result_0_pdcl_define_optimal_param/"
 ```
 
 # Introduction 
@@ -363,5 +363,5 @@ result_dir
 ```
 
 ```{r save-image, include=FALSE}
-save.image("pdcl_define_optim_param.RData")
+save.image("0_pdcl_define_optimal_param.RData")
 ```
