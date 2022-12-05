@@ -1,5 +1,7 @@
 ---
-title: "TCGA-GBM : Optimal Parameters"
+title: "TCGA-GBM : Define Optimal Parameters"
+author: "Kévin SPINICCI"
+date: "`r Sys.Date()`"
 output: 
   html_document:
     toc: true
@@ -14,64 +16,102 @@ library(purrr)
 library(penda)
 library(DESeq2)
 library(BiocParallel)
-
-knitr::opts_knit$set(root.dir = "~/PhD/Project/PDCL/TCGA-GBM_Personnalized/")
+library(factoextra)
 
 # Source files with functions used in next steps
-source("~/PhD/Project/PDCL/Code/R/gprofiler-analysis.R")
-source("~/PhD/Project/PDCL/Code/R/process-result.R")
-source("~/PhD/Project/PDCL/Code/R/quickgo.R")
-source("~/PhD/Project/PDCL/Code/R/kegg.R")
-source("~/PhD/Project/PDCL/Code/R/reactome.R")
+source("../Code/R/tcga-dataset.R")
+source("../Code/R/gprofiler-analysis.R")
+source("../Code/R/process-result.R")
+source("../Code/R/quickgo.R")
+source("../Code/R/kegg.R")
+source("../Code/R/reactome.R")
 
 multicoreParam <- BiocParallel::MulticoreParam(workers = 1)
 register(multicoreParam)
 
 validation_datasets_param <- list(
-  nb_validation_run = 10,
-  nb_validation_ctrl = 2
+  nb_validation_run = 12,
+  nb_validation_ctrl = 1
 )
 penda_datasets_param <- list(
   detectlowvalue = T, 
   detectNA = T, 
-  threshold = 0.95,
+  threshold = 0.99,
   val_min = NA,
   bimod = F
 )
 penda_simu_param <- list(
   size_grp = 100,
-  quant_simu = 0.05
+  quant_simu = 0.3
 )
 penda_L_H_params <- list(
   threshold = 0.99, 
   s_max = 100 
 )
 penda_quantile_param <- list(
-  quantile_values = seq(0, 1.0, by = 0.05),
+  quantile_values = c(0.0, 0.01, 0.03, seq(0.05, 0.95, by = 0.05) ),
   factor_values = seq(1, 2, by = 0.1),
   FDR_max = 0.05
 )
 penda_threshold_param <- list(
-  threshold_values = seq(0.0, 1.0, by = 0.05),
-  iterations = 10
+  threshold_values = c(0.01, 0.03, seq(0.05, 0.95, by = 0.05) ),
+  iterations = 10,
+  FDR_max = 0.05
 )
-rerun_cache <- T 
-result_dir <- "Result_tcga_define_optimal_param/"
+rerun_cache <- F 
+result_dir <- "Result_0_tcga_define_optimal_param/"
 ```
 
+# Introduction 
+
+This RMarkdown document is intended to find the optimal parameters to conduct a PenDA differential analysis.
+Here we will do :
+  * Normalization of count data following the Pseudo-Log method of the DESeq2 package
+  * PCA on the normalized count value
+  * Visualization of the density of the normalized count
+  * Filtering the data using the `penda::make_dataset` method
+  * Rank the genes with their relative ordering in the controls
+  * Assess the FDR/TPR for different factors and quantiles (when PenDA cannot use the Lower-Higher list)
+  * Assess the FDR/TPR for different thresholds (PenDA differential testing)
+
+# Dataset and Data Filtering
+
+## Prepare Count-Data
+
+Here we create a count table with all the samples in it (controls and tumours) with the associated metadata.
+
 ```{r prepare-count-data}
-# The matrix was prepared beforehand, we just need to the txt file
-count_data <- read.table("~/PhD/Project/PDCL/Data/TCGA-GBM-v32.0/count_matrix.txt", header = T, sep = "\t", as.is = T, row.names = 1, check.names = F)
-count_data <- count_data[isUnique(count_data$gene_name),]
-row.names(count_data) <- count_data$gene_name
-count_data <- count_data[,-1]
-count_metadata <- read.table("~/PhD/Project/PDCL/Data/TCGA-GBM-v32.0/gdc_sample_sheet.2022-07-18.tsv", header = T, as.is = T, sep = "\t", check.names = F)
-names(count_metadata) <- c("file_id",	"file_name", "data_category", "data_type", "project_id", "case_id", "sample_id", "sample_type")
-count_metadata$condition <- "tumor"
-control_index <- grep("solid", count_metadata$sample_type, ignore.case = T, perl = T)
-count_metadata$condition[control_index] <- "solid_tissue_normal"
+# Load counts and metadata
+hbm_count <- read.csv(TCGA_DATASET_PARAM$hbm_count_path, check.names = F)
+hbm_metadata <- read.csv(TCGA_DATASET_PARAM$hbm_metadata_path)
+tcga_gbm_count <- read.table(TCGA_DATASET_PARAM$tcga_count_path, sep = "\t", header = T, check.names = F)
+tcga_gbm_metadata <- read.table(TCGA_DATASET_PARAM$tcga_metadata_path, sep = "\t", header = T)
+# Merge counts
+count_data <- merge(hbm_count, tcga_gbm_count, by.x = "gene", by.y = "gene_name")
+count_data <- count_data[isUnique(count_data$gene),]
+count_data <- count_data[, !(colnames(count_data) %in% c("gene", "gene_id"))]
+# Create Metadata
+count_metadata <- data.frame(
+  sample_name = colnames(count_data), 
+  source = c( rep("hbm", nrow(hbm_metadata)), rep("tcga", nrow(tcga_gbm_metadata)) ),
+  sample_type = c(hbm_metadata$main_structure, tcga_gbm_metadata$Sample.Type),
+  condition = "tumour"
+)
+control_index <- which(count_metadata$source == "hbm" | count_metadata$sample_type == "Solid Tissue Normal")
+count_metadata$condition[control_index] <- "control"
+# Filter out samples
+count_metadata <- count_metadata[!(colnames(count_data) %in% TCGA_DATASET_PARAM$sample_to_remove), ]
+count_data <- count_data[, !(colnames(count_data) %in% TCGA_DATASET_PARAM$sample_to_remove)]
+count_data <- round(count_data)
 count_metadata$condition <- as.factor(count_metadata$condition)
+# Update control index and names
+control_index <- which(count_metadata$source == "hbm" | count_metadata$sample_type == "Solid Tissue Normal")
+control_names <- colnames(count_data)[control_index]
 ```
+
+## Pseudo-log Normalization
+
+Here we create a `DESeqDataSet` object to perform the Pseudo-Log Normlization.
 
 ```{r make-data}
 dds <- DESeqDataSetFromMatrix(
@@ -82,15 +122,50 @@ dds <- DESeqDataSetFromMatrix(
 dds <- DESeq(dds)
 pld <- normTransform(dds)
 normalized_count <- assay(pld, blind = F)
-control_names <- colnames(normalized_count)[control_index]
 all_data <- as.matrix(normalized_count)
 ```
+
+## Sample Validation
+
+PCA visualization to compare controls and tumour samples to ensure that they can be classified in 2 groups
+and that controls are not too different from each others.
+
+```{r pca-visualization, echo=FALSE}
+t_data <- t(all_data)
+t_data <- t_data[, colSds(t_data) != 0]
+pca_obj <- prcomp(t_data, scale. = T)
+pca_plot <- fviz_pca_ind(pca_obj, col.ind = count_metadata$condition, repel = T)
+pca_plot
+```
+
+Density of the normalized counts using the Pseudo-Log transformation from DESeq2 to compare the distribution
+of counts.
+
+```{r density-visualization, echo=FALSE}
+all_density <- purrr::map_dfr(1:ncol(all_data), function(i){
+  density_obj <- density(all_data[,i]) 
+  data.frame(count = density_obj$x, density = density_obj$y, sample_index = i)
+})
+all_density$sample_type <- count_metadata$sample_type[all_density$sample_index]
+all_density$condition <- count_metadata$condition[all_density$sample_index]
+density_plot <- ggplot(all_density, aes(count, density, group = sample_index, colour = condition)) +
+  geom_line(show.legend = F) +
+  facet_wrap(~condition, ncol = 1) +
+  labs(title = "Density plot of the log(count+1)")
+density_plot
+```
+
+## Data filtering
 
 Here we prepare several PenDA datasets to perform crossed-validation. We don't have enough controls so we use this approach to ensure the quality of the Differential Expression analysis.
 
 ```{r make-penda-datasets}
+set.seed(1)
+# Generate all combinations of n-controls
 simulated_cases <- combn(control_names, validation_datasets_param$nb_validation_ctrl, simplify = F)
+# Sample n-index 
 simulated_index <- sample(1:length(simulated_cases), validation_datasets_param$nb_validation_run)
+# keep only n simulated cases
 simulated_cases <- simulated_cases[simulated_index]
 
 all_penda_datasets <- xfun::cache_rds({
@@ -113,7 +188,12 @@ all_simulated_datasets <- xfun::cache_rds({
       all_data[row.names(data_ctrl),data_simu]
     })
 }, rerun = rerun_cache, file = "all_penda_simulated_datasets.rds", dir = result_dir)
+
 ```
+
+## Relative gene ordering
+
+We compute the Lower/Higher list for each datasets for later PenDA test.
 
 ```{r compute-L-H-lists}
 all_L_H_list <- with(penda_L_H_params, {
@@ -122,6 +202,11 @@ all_L_H_list <- with(penda_L_H_params, {
   })
 })
 ```
+
+## Generation of simulated datasets
+
+Here we use the `penda::complex_simulation` function to simulate a dataset with 
+cancer deregulation.
 
 ```{r generate-simulatd-datasets}
 all_simulation <- xfun::cache_rds({
@@ -136,9 +221,14 @@ all_simulation <- xfun::cache_rds({
 }, rerun = rerun_cache, file = "all_simulation.rds", dir = result_dir)
 ```
 
-# Find Optimal Quantiles
+# Define optimal paramaters
 
-```{r choose-quantiles, results='hide'}
+## Define optimal parameters for quantile method
+
+Here we run the quantile test for each simulated datasets so we can assess the
+FDR/TPR and find the best parameters for this method.
+
+```{r choose-quantiles, message=FALSE}
 all_which_quantiles <- xfun::cache_rds({
   with(penda_quantile_param, {
     BiocParallel::bplapply(1:length(all_simulation), function(i){
@@ -151,7 +241,9 @@ all_which_quantiles <- xfun::cache_rds({
 }, rerun = rerun_cache, file = "all_which_quantiles.rds", dir = result_dir)
 ```
 
-```{r optimal-quantiles}
+```{r optimal-quantiles, message=FALSE, warning=FALSE, echo=FALSE}
+# Suppress warnings that indicate the FDR is not reachable because we know it 
+# from the DF of best quantile.
 all_best_quantile <- with(penda_quantile_param, {
    lapply(all_which_quantiles, function(which_quantile){
      penda::select_quantile_param(which_quantile, FDR_max = FDR_max)
@@ -171,45 +263,51 @@ df_quant <- purrr::imap_dfr(all_which_quantiles, function(which_quantile, simu_n
 df_best_quantile <- purrr::imap_dfr(all_best_quantile, function(best_quantile, i){
   data.frame(factor = best_quantile$factor, quantile = best_quantile$quantile, FDR = best_quantile$FDR, TPR = best_quantile$TPR, simu_dataset = i, row.names = NULL)
 })
-df_best_quantile
+
+df_best_quantile[order(df_best_quantile$FDR), ]
 ```
 
 ```{r plot-optimal-quantiles, echo = FALSE}
-best_quantile <- df_best_quantile[which.min(df_best_quantile$FDR),]
+data <- df_quant %>% dplyr::filter(factor %in% unique(df_best_quantile$factor[order(df_best_quantile$FDR)])[1:6] )
 
-plot_optimal_quantiles <- ggplot(df_quant, aes(x = FDR, y = TPR, color = quantile, group = factor, shape = factor)) + geom_point() + 
+plot_optimal_quantiles <- ggplot(data, aes(x = FDR, y = TPR, color = quantile, group = factor, shape = factor)) + geom_point() + 
   geom_line() + 
   theme_minimal() +
-  geom_vline(xintercept = best_quantile$FDR, linetype = "dotted")  +
-  geom_hline(yintercept = best_quantile$TPR, linetype = "dotted") +
+  geom_vline(xintercept = penda_quantile_param$FDR_max, linetype = "dotted")  +
   xlim(0.0, 1.0) +
   ylim(0.0, 1.0)
 
 plot_optimal_quantiles
 ```
 
-# Find Optimal Threshold
+## Define optimal parameters for PenDA method
 
-```{r choose-thresholds, results='hide'}
+Here we run the PenDA test for each simulated datasets so we can assess the
+FDR/TPR and find the best parameters for this method.
+
+```{r choose-thresholds, message=FALSE}
 all_which_threshold <- xfun::cache_rds({
   with(penda_threshold_param,{
     BiocParallel::bplapply(1:length(all_best_quantile), function(i){
       data_ctrl <- all_penda_datasets[[i]]$data_ctrl
-      best_quant <- all_best_quantile[[i]]
+      best_quantile <- all_best_quantile[[i]]
       L_H_list <- all_L_H_list[[i]]
       simulation <- all_simulation[[i]]
-      best_quant = best_quantile$quantile
-      best_fact = best_quantile$factor
-      penda::choose_threshold(data_ctrl, L_H_list, iterations, simulation, threshold_values, quant_test = best_quant, factor_test = best_fact)
+      quant_test = best_quantile$quantile
+      factor_test = best_quantile$factor
+      penda::choose_threshold(data_ctrl, L_H_list, iterations, simulation, threshold_values, quant_test = quant_test, factor_test = factor_test)
     })
   })
 }, rerun = rerun_cache, file = "all_which_threshold.rds", dir = result_dir)
-
 ```
 
-```{r optimal-thresholds, message=FALSE}
+<!-- 
+  Suppress warnings that indicate the FDR is not reachable because we know it 
+  from the DF of best thresholds.
+-->
+```{r optimal-thresholds, message=FALSE, warning=FALSE, echo=FALSE}
 all_best_threshold <- lapply(all_which_threshold, function(which_threshold){
-  penda::select_threshold_param(which_threshold, FDR_max = 0.05)
+  penda::select_threshold_param(which_threshold, FDR_max = penda_threshold_param$FDR_max)
 })
 
 df_which_threshold <- purrr::imap_dfr(all_which_threshold, function(which_threshold, i){
@@ -240,16 +338,19 @@ df_best_threshold <- purrr::imap_dfr(all_best_threshold, function(best_threshold
     row.names = NULL
   )
 })
-df_best_threshold
+
+df_best_threshold[order(df_best_threshold$FDR), ]
 ```
 
 ```{r plot-optimal-thresholds, echo=FALSE}
-best_threshold <- df_best_threshold[which.min(df_best_threshold$FDR), ]
+data <- df_quant %>% dplyr::filter(factor %in% unique(df_best_quantile$factor[order(df_best_quantile$FDR)])[1:6] )
   
 plot_optimal_thresholds <- ggplot(df_which_threshold, aes(x = FDR, y = TPR, color = threshold, group = simu_datasets)) +
-  geom_point() + geom_line() + theme_minimal() +
-  geom_vline(xintercept = best_threshold$FDR, linetype = "dotted")  +
-  geom_hline(yintercept = best_threshold$TPR, linetype = "dotted")   
+  geom_point() +
+  geom_line() +
+  theme_minimal() +
+  geom_vline(xintercept = penda_threshold_param$FDR_max, linetype = "dotted")
+
 plot_optimal_thresholds
 ```
 
@@ -266,6 +367,6 @@ rerun_cache
 result_dir
 ```
 
-```{r save-session, show=FALSE}
-save.image("tcga_define_optimal_param.RData")
+```{r save-image, include=FALSE}
+save.image("0_tcga_define_optimal_param.RData")
 ```
