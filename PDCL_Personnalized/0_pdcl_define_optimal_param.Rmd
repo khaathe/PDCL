@@ -156,12 +156,10 @@ Here we prepare several PenDA datasets to perform crossed-validation. We don't h
 
 ```{r make-penda-datasets}
 set.seed(1)
-# Generate all combinations of n-controls
-simulated_cases <- combn(control_names, validation_datasets_param$nb_validation_ctrl, simplify = F)
-# Sample n-index 
-simulated_index <- sample(1:length(simulated_cases), validation_datasets_param$nb_validation_run)
-# keep only n simulated cases
-simulated_cases <- simulated_cases[simulated_index]
+# sample n times a vector of size k in the control (see validation_datasets_param)
+simulated_cases <- lapply(1:validation_datasets_param$nb_validation_run, function(i){
+  sample(control_names, validation_datasets_param$nb_validation_ctrl)
+})
 
 all_penda_datasets <- xfun::cache_rds({
   with(penda_datasets_param, {
