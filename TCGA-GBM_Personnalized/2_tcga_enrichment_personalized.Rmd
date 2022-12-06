@@ -19,7 +19,7 @@ library(mclust)
 library(factoextra)
 
 # Source files with functions used in next step
-source("../Code/R/pdcl-dataset.R")
+source("../Code/R/tcga-dataset.R")
 source("../Code/R/gprofiler-analysis.R")
 source("../Code/R/gsea-analysis.R")
 source("../Code/R/process-result.R")

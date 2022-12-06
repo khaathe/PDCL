@@ -19,7 +19,7 @@ library(penda)
 library(DESeq2)
 
 # Source files with functions used in next steps
-source("../Code/R/pdcl-dataset.R")
+source("../Code/R/tcga-dataset.R")
 
 validation_datasets_param <- list(
   nb_validation_run = 1,
