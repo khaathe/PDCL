@@ -9,7 +9,6 @@ output:
 
 ```{r setup, include=FALSE}
 library(flexdashboard)
-knitr::opts_chunk$set(cache=TRUE)
 
 # Load required libraries (others are load directly in sourced files)
 library(DESeq2)
@@ -17,18 +16,19 @@ library(gprofiler2)
 library(dplyr)
 library(purrr)
 library(plotly)
+library(Biobase)
 
 # Source files with functions used in next steps
-source("~/PhD/Project/PDCL/Code/R/gprofiler-analysis.R")
-source("~/PhD/Project/PDCL/Code/R/gsea-analysis.R")
-source("~/PhD/Project/PDCL/Code/R/process-result.R")
-source("~/PhD/Project/PDCL/Code/R/quickgo.R")
-source("~/PhD/Project/PDCL/Code/R/kegg.R")
-source("~/PhD/Project/PDCL/Code/R/kegg.R")
-source("~/PhD/Project/PDCL/Code/R/reactome.R")
+source("../Code/R/tcga-dataset.R")
+source("../Code/R/gprofiler-analysis.R")
+source("../Code/R/gsea-analysis.R")
+source("../Code/R/process-result.R")
+source("../Code/R/quickgo.R")
+source("../Code/R/kegg.R")
+source("../Code/R/reactome.R")
 
 # Constant
-result_dir <- "Result_tcga_enrichment/"
+result_dir <- "Result_1_tcga_enrichment/"
 ```
 
 ```{r utility-functions}
@@ -57,47 +57,58 @@ prepare.count.matrix <- function(expr.dir, metadata.file){
 }
 ```
 
-# Data Loading
-
-```{r define-gmt-path, echo = TRUE}
+```{r define-gmt-path}
 gmt_path <- list(
-  reactome = "~/PhD/Project/PDCL/Data/gene-set/reactome_no_less_15_no_more_500.gmt",
-  kegg = "~/PhD/Project/PDCL/Data/gene-set/kegg_no_less_15_no_more_500.gmt"
+  reactome = "../Data/gene-set/reactome_no_less_15_no_more_500.gmt",
+  kegg = "../Data/gene-set/kegg_no_less_15_no_more_500.gmt"
 )
 ```
 
-Load GMT files for GSEA pathway enrichment.
+<!-- Load GMT files for GSEA pathway enrichment. -->
 
-```{r create-gsea-gmt-list, echo = TRUE}
+```{r create-gsea-gmt-list}
 gsea_gmt_list <- lapply(gmt_path, function(x){ gmtPathways(x)})
 ```
 
-Load G:Profiler GMTs
+<!-- Load G:Profiler GMTs -->
+<!-- Upload GMT File before running G:Profiler Enrichment Analysis if needed. Otherwise juste define the token of the GMT stored on G:Profiler website. -->
 
-Upload GMT File before running G:Profiler Enrichment Analysis if needed. Otherwise juste define the token of the GMT stored on G:Profiler website.
-
-```{r create-gprofiler-gmt-list, echo = TRUE}
-# This portion is commented because the file are already uploaded
-gprofiler_gmt_list <- lapply(gmt_path, function(x){ upload_GMT_file(x) })
-# bioplanet_gmt_token <- "gp__vB7V_DT57_yNY"
-# gprofiler_gmt_list <- list(reactome = "gp__Nqmx_yxm7_37U", kegg = "gp__5f4Q_8t3p_PVw")
-# gprofiler_gmt_list <- list(reactome = "gp__VxvL_Ua0o_Irk", kegg = "gp__5f4Q_8t3p_PVw")
+```{r create-gprofiler-gmt-list}
+# Use RDS caching so we don't have to reupload the gmt files each times
+gprofiler_gmt_list <- xfun::cache_rds({
+  lapply(gmt_path, function(x){ upload_GMT_file(x) })
+}, file = "gprofiler_gmt.rds", dir = result_dir, rerun = rerun_rds_cached)
 ```
 
 # DESeq2
 
 ```{r prepare-count-data}
-# The matrix was prepared beforehand, we just need to the txt file
-count_data <- read.table("~/PhD/Project/PDCL/Data/TCGA-GBM-v32.0/count_matrix.txt", header = T, sep = "\t", as.is = T, row.names = 1, check.names = F)
-count_data <- count_data[isUnique(count_data$gene_name),]
-row.names(count_data) <- count_data$gene_name
-count_data <- count_data[,-1]
-count_metadata <- read.table("~/PhD/Project/PDCL/Data/TCGA-GBM-v32.0/gdc_sample_sheet.2022-07-18.tsv", header = T, as.is = T, sep = "\t", check.names = F)
-names(count_metadata) <- c("file_id",	"file_name", "data_category", "data_type", "project_id", "case_id", "sample_id", "sample_type")
-count_metadata$condition <- "tumor"
-index_normal <- grep("solid", count_metadata$sample_type, ignore.case = T, perl = T)
-count_metadata$condition[index_normal] <- "solid_tissue_normal"
+# Load counts and metadata
+hbm_count <- read.csv(TCGA_DATASET_PARAM$hbm_count_path, check.names = F)
+hbm_metadata <- read.csv(TCGA_DATASET_PARAM$hbm_metadata_path)
+tcga_gbm_count <- read.table(TCGA_DATASET_PARAM$tcga_count_path, sep = "\t", header = T, check.names = F)
+tcga_gbm_metadata <- read.table(TCGA_DATASET_PARAM$tcga_metadata_path, sep = "\t", header = T)
+# Merge counts
+count_data <- merge(hbm_count, tcga_gbm_count, by.x = "gene", by.y = "gene_name")
+count_data <- count_data[isUnique(count_data$gene),]
+count_data <- count_data[, !(colnames(count_data) %in% c("gene", "gene_id"))]
+# Create Metadata
+count_metadata <- data.frame(
+  sample_name = colnames(count_data), 
+  source = c( rep("hbm", nrow(hbm_metadata)), rep("tcga", nrow(tcga_gbm_metadata)) ),
+  sample_type = c(hbm_metadata$main_structure, tcga_gbm_metadata$Sample.Type),
+  condition = "tumour"
+)
+control_index <- which(count_metadata$source == "hbm" | count_metadata$sample_type == "Solid Tissue Normal")
+count_metadata$condition[control_index] <- "control"
+# Filter out samples
+count_metadata <- count_metadata[!(colnames(count_data) %in% TCGA_DATASET_PARAM$sample_to_remove), ]
+count_data <- count_data[, !(colnames(count_data) %in% TCGA_DATASET_PARAM$sample_to_remove)]
+count_data <- round(count_data)
 count_metadata$condition <- as.factor(count_metadata$condition)
+# Update control index and names
+control_index <- which(count_metadata$source == "hbm" | count_metadata$sample_type == "Solid Tissue Normal")
+control_names <- colnames(count_data)[control_index]
 ```
 
 ## Column {data-width="400"}
@@ -113,10 +124,9 @@ dds <- DESeqDataSetFromMatrix(
 )
 dds <- DESeq(dds)
 
-deseq2_res <- results(dds, alpha = alpha, contrast = c("condition", "tumor", "solid_tissue_normal"))
-
-saveRDS(deseq2_res, file = paste0(result_dir, "deseq2_tumor_vs_solid_tissue_normal.rds"))
-write.csv(as.data.frame(deseq2_res), file = paste0(result_dir, "deseq2/deseq2_tumor_vs_solid_tissue_normal.csv"))
+deseq2_res <- xfun::cache_rds({
+  results(dds, alpha = alpha, contrast = c("condition", "tumor"))
+}, file = "deseq2_tumor_vs_solid_tissue_normal.rds", dir = result_dir, rerun = rerun_rds_cached)
 
 deregulated_index <- which(deseq2_res$padj <= alpha)
 deregulated_genes <- row.names(deseq2_res)[deregulated_index]
@@ -215,17 +225,17 @@ gmt_desc <- lapply(gmt_path, function(x){
 })
 
 # Run GSEA analysis for each ranked list for both Reactome and KEGG
-all_res[["GSEA"]] <- run.gsea(rank_list, gsea_gmt_list, gmt_desc)
+all_res[["GSEA"]] <- xfun::cache_rds({
+  all_res[["GSEA"]] <- run.gsea(rank_list, gsea_gmt_list, gmt_desc)
+}, file = "gsea_results.rds", dir = result_dir, rerun = rerun_rds_cached)
 ```
 
 ```{r run-gprofiler}
 all_pdcl_genes <- row.names(deseq2_res)
 all_gene_list <- list("tcga_gbm" = deregulated_genes)
-all_res[["G:Profiler"]] <- run.gost(all_gene_list, gprofiler_gmt_list, all_pdcl_genes)
-```
-
-```{r save-rds}
-saveRDS(all_res, file = paste0(result_dir, "all_res.rds"))
+all_res[["G:Profiler"]] <- xfun::cache_rds({
+  all_res[["G:Profiler"]] <- run.gost(all_gene_list, gprofiler_gmt_list, all_pdcl_genes)
+}, file = "gprofiler_results.rds", dir = result_dir, rerun = rerun_rds_cached)
 ```
 
 ```{r convert-to-enrichment}
