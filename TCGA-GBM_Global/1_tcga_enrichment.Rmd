@@ -1,5 +1,5 @@
 ---
-title: "TCGA Enrichment"
+title: "1 - TCGA Enrichment"
 output: 
   flexdashboard::flex_dashboard:
     orientation: column
@@ -28,6 +28,7 @@ source("../Code/R/kegg.R")
 source("../Code/R/reactome.R")
 
 # Constant
+rerun_rds_cached <- T
 result_dir <- "Result_1_tcga_enrichment/"
 ```
 
@@ -91,6 +92,7 @@ tcga_gbm_metadata <- read.table(TCGA_DATASET_PARAM$tcga_metadata_path, sep = "\t
 # Merge counts
 count_data <- merge(hbm_count, tcga_gbm_count, by.x = "gene", by.y = "gene_name")
 count_data <- count_data[isUnique(count_data$gene),]
+row.names(count_data) <- count_data$gene
 count_data <- count_data[, !(colnames(count_data) %in% c("gene", "gene_id"))]
 # Create Metadata
 count_metadata <- data.frame(
@@ -120,12 +122,12 @@ alpha <- 0.05
 dds <- DESeqDataSetFromMatrix(
   countData = count_data, 
   colData = count_metadata, 
-  design = ~condition
+  design = ~source+condition
 )
 dds <- DESeq(dds)
 
 deseq2_res <- xfun::cache_rds({
-  results(dds, alpha = alpha, contrast = c("condition", "tumor"))
+  results(dds, alpha = alpha, contrast = c("condition", "tumour", "control"))
 }, file = "deseq2_tumor_vs_solid_tissue_normal.rds", dir = result_dir, rerun = rerun_rds_cached)
 
 deregulated_index <- which(deseq2_res$padj <= alpha)
@@ -138,7 +140,7 @@ summary(deseq2_res)
 
 ```{r compare-lfc}
 count_data <- assay(dds)
-tumor_index <- which(dds$condition == "tumor")
+tumor_index <- which(dds$condition == "tumour")
 tumor_mean_expr <- rowMeans(count_data[,tumor_index])
 names(tumor_mean_expr) <- colnames(count_data)[tumor_index]
 control_mean_expr <- rowMeans(count_data[,-tumor_index])
@@ -259,6 +261,7 @@ save.gost.gem.list.to.txt(all_enrichment[["G:Profiler"]], paste0(result_dir, "gp
 all_enrich_collapsed <- collapse.enrichment(all_enrichment)
 threshold <- 0.1
 ```
+
 ```{r find-common-pathways}
 common_pathway_id <- all_enrich_collapsed %>% 
   filter(fdr < threshold) %>% 
@@ -379,13 +382,13 @@ count_enrich_pathways
 ### Number of Enriched Kegg Categories
 <!-- Retrieve Categories for enriched pathways -->
 
-```{r kegg-categories, cache=TRUE}
+```{r kegg-categories}
 kegg_gs_metadata <- read.csv("~/PhD/Project/PDCL/Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
 kegg_categories <- factor(kegg_gs_metadata$category, levels = KEGG_TOP_CATEGORIES)
 names(kegg_categories) <- kegg_gs_metadata$pathway_id
 ```
 
-```{r reactome-categories, cache=TRUE}
+```{r reactome-categories}
 react_gs_metadata <- read.csv("~/PhD/Project/PDCL/Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
 react_categories <- factor(react_gs_metadata$category, levels = REACTOME_TOP_LEVEL_PATHWAYS)
 names(react_categories) <- react_gs_metadata$pathway_id
@@ -433,5 +436,5 @@ DT::datatable(
 
 
 ```{r save-session, show=FALSE}
-save.image("tcga_enrichment.RData")
+save.image("1_tcga_enrichment.RData")
 ```
