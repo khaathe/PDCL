@@ -18,16 +18,17 @@ library(DT)
 library(mclust)
 library(factoextra)
 
-# Source files with functions used in next steps
-source("~/PhD/Project/PDCL/Code/R/gprofiler-analysis.R")
-source("~/PhD/Project/PDCL/Code/R/gsea-analysis.R")
-source("~/PhD/Project/PDCL/Code/R/process-result.R")
-source("~/PhD/Project/PDCL/Code/R/quickgo.R")
-source("~/PhD/Project/PDCL/Code/R/kegg.R")
-source("~/PhD/Project/PDCL/Code/R/reactome.R")
+# Source files with functions used in next step
+source("../Code/R/pdcl-dataset.R")
+source("../Code/R/gprofiler-analysis.R")
+source("../Code/R/gsea-analysis.R")
+source("../Code/R/process-result.R")
+source("../Code/R/quickgo.R")
+source("../Code/R/kegg.R")
+source("../Code/R/reactome.R")
 
 # Constant
-rerun_rds_cached <- FALSE
+rerun_rds_cached <- F
 result_dir <- "Result_2_pdcl_enrichment_personnalized/"
 ```
 
@@ -133,8 +134,8 @@ penda_genes <- row.names(penda_res)
 
 ```{r define-gmt-path}
 gmt_path <- list(
-  reactome = "~/PhD/Project/PDCL/Data/gene-set/reactome_no_less_15_no_more_500.gmt",
-  kegg = "~/PhD/Project/PDCL/Data/gene-set/kegg_no_less_15_no_more_500.gmt"
+  reactome = "../Data/gene-set/reactome_no_less_15_no_more_500_categ_filtered.gmt",
+  kegg = "../Data/gene-set/kegg_no_less_15_no_more_500_categ_filtered.gmt"
 )
 ```
 
@@ -157,7 +158,7 @@ all_res <- list()
 ```{r run-gprofiler}
 all_pdcl_genes <- row.names(penda_res)
 all_gene_list <- lapply(penda_res, function(x){
-  all_pdcl_genes[x != 0]
+  all_pdcl_genes[which(x != 0)]
 })
 # Use RDS caching as G:Profiler run are long for 20 samples
 all_res[["G:Profiler"]] <- xfun::cache_rds({
@@ -173,8 +174,8 @@ all_enrichment[["G:Profiler"]] <- map_depth(all_res[["G:Profiler"]], .depth = 1,
 <!-- Retrieve Categories for enriched pathways -->
 
 ```{r gs-metadata}
-kegg_gs_metadata <- read.csv("~/PhD/Project/PDCL/Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
-react_gs_metadata <- read.csv("~/PhD/Project/PDCL/Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
+kegg_gs_metadata <- read.csv("../Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
+react_gs_metadata <- read.csv("../Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
 all_gs_metadata <- rbind(kegg_gs_metadata, react_gs_metadata)
 ```
 
@@ -229,7 +230,7 @@ enriched_categories_kegg
 
 ```{r common-pathways-kegg, fig.width=14, fig.height=8}
 rank_pdcl <- kegg_significant %>%
-  dplyr::mutate(sample = factor(sample, levels = pdcl_names)) %>%
+  dplyr::mutate(sample = factor(sample, levels = PDCL_DATASET_PARAM$pdcl_sample_names)) %>%
   dplyr::count(sample, .drop = FALSE) %>%
   dplyr::arrange(desc(n)) %>%
   dplyr::pull(sample)
@@ -371,7 +372,7 @@ enriched_categories_reactome
 
 ```{r common-pathways-reactome, fig.width=14, fig.height=8}
 rank_pdcl <- reactome_significant %>%
-  dplyr::mutate(sample = factor(sample, levels = pdcl_names)) %>%
+  dplyr::mutate(sample = factor(sample, levels = PDCL_DATASET_PARAM$pdcl_sample_names)) %>%
   dplyr::count(sample, .drop = FALSE) %>%
   dplyr::arrange(desc(n)) %>%
   dplyr::pull(sample)

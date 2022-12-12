@@ -58,15 +58,15 @@ prepare.fdr.data <- function(significant_ids, pattern){
 <!-- Load PENDA results -->
 
 ```{r load-penda}
-penda_res <- read.csv("~/PhD/tmp/penda_dereg_matrix_pdcl.csv", row.names = 1, check.names = F)
+penda_res <- readRDS(TCGA_DATASET_PARAM$penda_result)
 ```
 
 <!-- Define GMT path -->
 
 ```{r define-gmt-path}
 gmt_path <- list(
-  reactome = "../Data/gene-set/reactome_no_less_15_no_more_500.gmt",
-  kegg = "../Data/gene-set/kegg_no_less_15_no_more_500.gmt"
+  reactome = "../Data/gene-set/reactome_no_less_15_no_more_500_categ_filtered.gmt",
+  kegg = "../Data/gene-set/kegg_no_less_15_no_more_500_categ_filtered.gmt"
 )
 ```
 

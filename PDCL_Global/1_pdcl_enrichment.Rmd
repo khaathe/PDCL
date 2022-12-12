@@ -38,8 +38,8 @@ Define GMT path
 
 ```{r define-gmt-path, echo = TRUE}
 gmt_path <- list(
-  reactome = "~/PhD/Project/PDCL/Data/gene-set/reactome_no_less_15_no_more_500.gmt",
-  kegg = "~/PhD/Project/PDCL/Data/gene-set/kegg_no_less_15_no_more_500.gmt"
+  reactome = "../Data/gene-set/reactome_no_less_15_no_more_500_categ_filtered.gmt",
+  kegg = "../Data/gene-set/kegg_no_less_15_no_more_500_categ_filtered.gmt"
 )
 ```
 
@@ -235,7 +235,9 @@ save.gost.gem.list.to.txt(all_enrichment[["G:Profiler"]], paste0(result_dir, "gp
 # Collapse the results by method.
 # One line contain the result of one enrichment method for one pathway of one PDCL
 # TODO! Redefine how it will be collapsed
-all_enrich_collapsed <- collapse.enrichment(all_enrichment)
+all_enrich_collapsed <- xfun::cache_rds({
+  collapse.enrichment(all_enrichment)
+}, file = "all_enrichment.rds", dir = result_dir, rerun = rerun_rds_cached)
 threshold <- 0.1
 ```
 
