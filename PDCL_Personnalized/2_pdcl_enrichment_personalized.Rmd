@@ -55,79 +55,11 @@ prepare.fdr.data <- function(significant_ids, pattern){
 
 <!-- Data Loading -->
 
-<!-- Load controls -->
-
-```{r load-controls}
-control_file <- "~/PhD/Project/PDCL/Data/PDCL/astrocyte_GSE109001_counts_unique_genes_samples_filtered.txt"
-control <- read.table(
-  control_file, 
-  header = T, 
-  sep = "\t", 
-  as.is = c("id", "symbol")
-)
-control_names <- c(
-  "AF22_NES_Astro_Br1_d29_37_S46",
-  "AF22_NES_Astro_Br2_d29_38_S56",
-  "AF22_NES_Astro_Br3_d29_39_S66",
-  "CCF.STTG1_p24_Br1_S16",
-  "CCF.STTG1_p24_Br2_S17",
-  "CCF.STTG1_p24_Br3_S18",
-  "CDIAstrocytes_p2_Br1_S19",
-  "CDIAstrocytes_p2_Br2_S20",
-  "CDIAstrocytes_p2_Br3_S21",
-  "phaAstrocyte_p2_Br1_S1",
-  "phaAstrocyte_p2_Br2_S2",
-  "phaAstrocyte_p2_Br3_S3"
-  )
-```
-
-<!-- Load PDCL DataBase -->
-
-<!-- Load the PDCL count table. Disabled check.names otherwise it will add a X at the beginning of each column name, as column names aren't valid according to R. -->
-
-```{r load-pdcl}
-pdcl_count_table <- read.table(
-  "~/PhD/Project/PDCL/Data/PDCL/lignees_count_genes_PDCL.txt", 
-  sep = "\t", 
-  header = T, 
-  as.is = "gene_id", 
-  check.names = F
-)
-
-pdcl_names <- c(
-  "4339-p21",
-  "4371-p37",
-  "5706-p14",
-  "6190-p43",
-  "6240-p12",
-  "7015-p17",
-  "7060-p18", 
-  "7142-p14",
-  "N13-1300",
-  "N13-1520-p9",
-  "N14-0072",
-  "N14-0870",
-  "N14-1208",
-  "N14-1525",
-  "N15_0460",
-  "N15_0516",
-  "N15-0385",
-  "N15-0661",
-  "N16_0535",
-  "N16-0240"
-)
-```
-
 <!-- Load PENDA results -->
 
 ```{r load-penda}
-penda_res <- readRDS("~/PhD/Project/PDCL/Data/PDCL/results_penda_astrocytes_2021.rds")
+penda_res <- readRDS(PDCL_DATASET_PARAM$penda_result)
 penda_res <- as.data.frame(penda_res)
-penda_pdcl_names <- names(penda_res)
-# Remove ".genes.results" string in the column names
-penda_pdcl_names <- sub(".genes.results", "", penda_pdcl_names, ignore.case = T)
-names(penda_res) <- penda_pdcl_names
-penda_genes <- row.names(penda_res)
 ```
 
 <!-- Define GMT path -->

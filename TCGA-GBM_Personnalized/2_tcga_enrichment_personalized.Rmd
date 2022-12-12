@@ -59,6 +59,7 @@ prepare.fdr.data <- function(significant_ids, pattern){
 
 ```{r load-penda}
 penda_res <- readRDS(TCGA_DATASET_PARAM$penda_result)
+penda_res <- as.data.frame(penda_res)
 ```
 
 <!-- Define GMT path -->
