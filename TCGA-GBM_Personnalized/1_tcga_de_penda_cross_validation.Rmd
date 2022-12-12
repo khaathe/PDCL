@@ -57,6 +57,7 @@ tcga_gbm_metadata <- read.table(TCGA_DATASET_PARAM$tcga_metadata_path, sep = "\t
 # Merge counts
 count_data <- merge(hbm_count, tcga_gbm_count, by.x = "gene", by.y = "gene_name")
 count_data <- count_data[isUnique(count_data$gene),]
+row.names(count_data) <- count_data$gene
 count_data <- count_data[, !(colnames(count_data) %in% c("gene", "gene_id"))]
 # Create Metadata
 count_metadata <- data.frame(
