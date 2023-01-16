@@ -5,197 +5,274 @@ library(reticulate)
 reticulate::use_python("/usr/bin/python3")
 reticulate::py_run_string("import sys")
 
-setwd("~/PhD/PDCL/")
-source("R/process-result.R")
+pdcl_global_rds <- "~/PhD/tmp/all_enrichment_pdcl_global.rds"
+tcga_global_rds <- "~/PhD/tmp/all_enrichment_tcga_global.rds"
+pdcl_personnalized <- "~/PhD/tmp/all_enrichment_pdcl_personnalized.rds"
+kegg_gs_md_file <- "~/PhD/Project/PDCL/Data/gene-set/kegg_geneset_metadata.csv"
+reactome_gs_md_file <- "~/PhD/Project/PDCL/Data/gene-set/reactome_geneset_metadata.csv"
 
-all_enrich <- read.csv("all_results.csv", as.is = T)
+####### Load Data
 
-glioma_pathways <- all_enrich %>% 
-  dplyr::filter(grepl("\\bglioma\\b", description, ignore.case = T, perl = T)) %>% 
-  dplyr::select(!genes)
+all_enrichment_pdcl_global <- readRDS(pdcl_global_rds)
+all_enrichment_tcga_global <- readRDS(tcga_global_rds)
+all_enrichment_pdcl_personnalized <- readRDS(pdcl_personnalized)
 
-data <- glioma_pathways %>% dplyr::filter( !(sample %in% c("tcga_gbm", "gbm")) )
+all_enrich <- rbind(all_enrichment_pdcl_global, all_enrichment_tcga_global, all_enrichment_pdcl_personnalized)
 
-glioma_fdr_boxplot <- ggplot(data, aes(x = method, y = fdr)) + 
-  geom_boxplot() + 
-  geom_hline(yintercept = 0.05, color = "red") + 
-  geom_hline(yintercept = 0.1, color = "blue") + 
-  labs(
-    title = "FDR of Glioma pathways in enrichment", 
-    x = "Enrichment Tools", 
-    y = "False Discovery Rate (FDR)"
-  )
-
-# ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/glioma-fdr-boxplot.png", plot = glioma_fdr_boxplot, width = 7, height = 7)
-
-global_and_tcga <- all_enrich %>%
-  dplyr::filter( sample %in% c("PDCL", "TCGA-GBM") )
-
-common_global_tcga <- global_and_tcga %>%
-  dplyr::inner_join(global_and_tcga, by = c("pathway_id", "description", "sample", "db")) %>%
-  dplyr::filter(method.x == "G:Profiler", method.y == "GSEA") %>%
-  dplyr::rename(fdr_gprofiler = fdr.x, fdr_gsea = fdr.y) %>%
-  dplyr::select(pathway_id, description, sample, db, fdr_gprofiler, fdr_gsea)
-
-common_global_tcga <- common_global_tcga %>%
-  dplyr::inner_join(common_global_tcga, by = c("pathway_id", "description", "db")) %>%
-  dplyr::filter(sample.x == "PDCL", sample.y == "TCGA-GBM") %>%
-  dplyr::rename(
-    fdr_gprofiler_pdcl = fdr_gprofiler.x, 
-    fdr_gsea_pdcl = fdr_gsea.x, 
-    fdr_gprofiler_tcga = fdr_gprofiler.y,
-    fdr_gsea_tcga = fdr_gsea.y
-  ) %>%
-  dplyr::select(pathway_id, description, db, fdr_gprofiler_pdcl, fdr_gprofiler_tcga, fdr_gsea_pdcl, fdr_gsea_tcga)
-
-threshold <- 0.1
-common_global_tcga <- common_global_tcga %>% 
-  dplyr::filter(fdr_gprofiler_pdcl < threshold, fdr_gprofiler_tcga < threshold, fdr_gsea_pdcl < threshold, fdr_gsea_tcga < threshold)
-
-kegg_gs_metadata <- read.csv("Data/gene-set/kegg_geneset_metadata.csv", as.is = T)
-reactome_gs_metadata <- read.csv("Data/gene-set/reactome_geneset_metadata.csv", as.is = T)
+kegg_gs_metadata <- read.csv(kegg_gs_md_file, as.is = T)
+reactome_gs_metadata <- read.csv(reactome_gs_md_file, as.is = T)
 
 gs_metadata <- rbind(kegg_gs_metadata, reactome_gs_metadata)
 row.names(gs_metadata) <- gs_metadata$pathway_id
 
-common_global_tcga$category <- gs_metadata[common_global_tcga$pathway_id, "category"]
-common_global_tcga <- common_global_tcga %>% dplyr::arrange(category, description)
+threshold <- 0.05
 
-data <- global_and_tcga[global_and_tcga$pathway_id %in% common_global_tcga$pathway_id, ]
-data$description <- factor(data$description, levels = common_global_tcga$description, ordered = T)
+####### Global Analysis
 
-heatmap_global_tcga <- ggplot(data, aes(x = method, y = description, fill = fdr)) +
-  geom_tile() +
-  facet_wrap(~sample) +
-  scale_fill_viridis_c() +
-  scale_y_discrete(limits = rev) +
-  labs(
-    title = "FDR for Pathway Common between PDCL and TCGA datasets",
-    x = "Pathway Enrichment Tool",
-    y = "Pathways",
-    fill = "FDR"
+all_enrichment_global <- rbind(all_enrichment_pdcl_global, all_enrichment_tcga_global)
+
+get.common.pathways <- function(x){
+  x %>%
+    inner_join(x, by=c("pathway_id", "description", "sample", "db")) %>%
+    dplyr::filter(fdr.x<threshold, fdr.y<threshold, method.x == "G:Profiler", method.y == "GSEA") %>%
+    dplyr::rename(
+      p_value_gprofiler = p_value.x,
+      p_value_gsea = p_value.y,
+      fdr_gprofiler = fdr.x,
+      fdr_gsea = fdr.y, 
+      phenotype_gsea = phenotype.y,
+      gene_gprofiler = genes.x,
+      gene_gsea = genes.y
+    ) %>%
+    dplyr::select(sample, pathway_id, description, db, p_value_gprofiler, fdr_gprofiler, p_value_gsea, fdr_gsea, phenotype_gsea, gene_gprofiler, gene_gsea)
+}
+
+get.signficant.pathways <- function(x, gs, threshold){
+  x %>% 
+    dplyr::inner_join(gs, by = c("pathway_id", "description")) %>% 
+    dplyr::filter(fdr<threshold) %>%
+    dplyr::mutate(category = factor(category, levels = sort(unique(gs$category))))
+}
+
+common_pathway_pdcl_global <- get.common.pathways(all_enrichment_pdcl_global)
+common_pathway_tcga_global <- get.common.pathways(all_enrichment_tcga_global)
+common_pathway_global <- rbind(common_pathway_pdcl_global, common_pathway_tcga_global)
+common_pdcl_and_tcga_global_pathway_id <- common_pathway_pdcl_global$pathway_id[common_pathway_pdcl_global$pathway_id %in% common_pathway_tcga_global$pathway_id]
+
+####### Barplot
+
+barplot.category <- function(x){
+  ggplot(x, aes(category, fill = common)) +
+    geom_bar(position = "dodge2") + 
+    # scale_fill_brewer(palette = "Paired") +
+    theme(axis.text.x = element_text(angle = 90) ) +
+    labs(
+      x = "Biological Categories",
+      y = "Count Pathways",
+      fill = "Method"
+    ) +
+    scale_x_discrete(drop = F)
+}
+
+
+kegg_significant_global_pdcl <- get.signficant.pathways(all_enrichment_pdcl_global, kegg_gs_metadata, threshold)
+kegg_significant_global_pdcl$sample <- factor(kegg_significant_global_pdcl$sample, levels = c("gbm", "tcga_gbm"), labels = c("PDCL", "TCGA-GBM"))
+kegg_significant_global_pdcl$common <- factor(kegg_significant_global_pdcl$method, levels = c("Common", "G:Profiler", "GSEA"))
+kegg_significant_global_pdcl$common[kegg_significant_global_pdcl$pathway_id %in% common_pathway_pdcl_global$pathway_id] <- "Common"
+barplot_kegg_categ_pdcl_global <- barplot.category(kegg_significant_global_pdcl) + labs(title = "Count of deregulated pathways by samples and Kegg category - PDCL")
+
+reactome_significant_global_pdcl <- get.signficant.pathways(all_enrichment_pdcl_global, reactome_gs_metadata, threshold)
+reactome_significant_global_pdcl$sample <- factor(reactome_significant_global_pdcl$sample, levels = c("gbm", "tcga_gbm"), labels = c("PDCL", "TCGA-GBM"))
+reactome_significant_global_pdcl$common <- factor(reactome_significant_global_pdcl$method, levels = c("Common", "G:Profiler", "GSEA"))
+reactome_significant_global_pdcl$common[reactome_significant_global_pdcl$pathway_id %in% common_pathway_pdcl_global$pathway_id] <- "Common"
+barplot_reactome_categ_pdcl_global <- barplot.category(reactome_significant_global_pdcl) + labs(title = "Count of deregulated pathways by samples and Reactome category - PDCL")
+
+####### Barplot Reactome category
+
+kegg_significant_global_tcga <- get.signficant.pathways(all_enrichment_tcga_global, kegg_gs_metadata, threshold)
+kegg_significant_global_tcga$sample <- factor(kegg_significant_global_tcga$sample, levels = c("gbm", "tcga_gbm"), labels = c("PDCL", "TCGA-GBM"))
+kegg_significant_global_tcga$common <- factor(kegg_significant_global_tcga$method, levels = c("Common", "G:Profiler", "GSEA"))
+kegg_significant_global_tcga$common[kegg_significant_global_tcga$pathway_id %in% common_pathway_tcga_global$pathway_id] <- "Common"
+barplot_kegg_categ_tcga_global <- barplot.category(kegg_significant_global_tcga) + labs(title = "Count of deregulated pathways by samples and Kegg category - TCGA")
+
+reactome_significant_global_tcga <- get.signficant.pathways(all_enrichment_tcga_global, reactome_gs_metadata, threshold)
+reactome_significant_global_tcga$sample <- factor(reactome_significant_global_tcga$sample, levels = c("gbm", "tcga_gbm"), labels = c("PDCL", "TCGA-GBM"))
+reactome_significant_global_tcga$common <- factor(reactome_significant_global_tcga$method, levels = c("Common", "G:Profiler", "GSEA"))
+reactome_significant_global_tcga$common[reactome_significant_global_tcga$pathway_id %in% common_pathway_tcga_global$pathway_id] <- "Common"
+barplot_reactome_categ_tcga_global <- barplot.category(reactome_significant_global_tcga) + labs(title = "Count of deregulated pathways by samples and Reactome category - TCGA")
+
+barplot_categ_global <- cowplot::plot_grid(
+  barplot_kegg_categ_pdcl_global,
+  barplot_kegg_categ_tcga_global,
+  barplot_reactome_categ_pdcl_global,
+  barplot_reactome_categ_tcga_global,
+  labels = c("A", "B", "C", "D"),
+  nrow = 2
+)
+
+# ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/barplot-categ-global.png", plot = barplot_categ_global, width = 20, height = 10)
+
+########## Heatmap FDR
+
+fdr.breaks <- c(0.0, 0.01, 0.025, 0.04, 0.05, 0.1, 0.25, 0.50, 0.75, 1.00)
+fdr.labels <- c("0.01", "0.025", "0.04", "0.05", "0.1", "0.25", "0.50", "0.75", "1.0")
+heatmap.fdr <- function(x){
+  ggplot(x, aes(x = method, y = description, fill = fdr)) +
+    geom_tile() +
+    facet_wrap(~sample) +
+    scale_y_discrete(limits = rev) +
+    labs(
+      x = "Pathway Enrichment Tool",
+      y = "Pathways",
+      fill = "FDR"
+    ) +
+    theme(axis.text.x = element_text(angle = 90) ) +
+    scale_fill_brewer(
+      palette = "RdBu",
+      na.value = "gray30"
+    )
+}
+
+########## Heatmap FDR Kegg Selected
+
+kegg_selected_pathways <- c(
+  "path:hsa05214",
+  "path:hsa03030",
+  "path:hsa04510",
+  "path:hsa04360",
+  "path:hsa04512",
+  "path:hsa04724",
+  "path:hsa04725",
+  "path:hsa00100",
+  "path:hsa00190",
+  "path:hsa04612",
+  "path:hsa04723",
+  "path:hsa03008",
+  "path:hsa04012",
+  "path:hsa04072",
+  "path:hsa04392",
+  "path:hsa04514",
+  "path:hsa04010",
+  "path:hsa04012",
+  "path:hsa04014",
+  "path:hsa04115",
+  "path:hsa04150",
+  "path:hsa04150",
+  "path:hsa04151",
+  "path:hsa04330",
+  "path:hsa04370"
+)
+
+kegg_selected_pathways_global <- all_enrichment_global %>% 
+  dplyr::filter(pathway_id %in% kegg_selected_pathways) %>%
+  dplyr::mutate(
+    sample = factor(sample, labels = c("PDCL", "TCGA-GBM")),
+    fdr = cut(fdr, breaks = fdr.breaks, labels = fdr.labels),
+    description = sub(" - Homo sapiens \\(human\\)", "", description, perl = T)
   )
 
-# ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/heatmap-fdr-global-tcga.png", plot = heatmap_global_tcga, width = 10, height = 7)
+heatmap_fdr_kegg_selected_global <- heatmap.fdr(kegg_selected_pathways_global) +
+  labs(title = "Heatmap FDR of KEGG pathways for analysis at Population scale")
 
-common_pdcl <- all_enrich %>%  
-  dplyr::filter(
-    !(sample %in% c("TCGA-GBM", "PDCL")),
-    fdr < 0.1
-  ) %>%
-  dplyr::count(pathway_id, description, sample) %>%
-  dplyr::filter(n==2)
+########## Heatmap FDR Reactome Selected
 
-frequently_dereg <- common_pdcl %>%
-  dplyr::count(pathway_id, description) %>%
-  dplyr::inner_join(gs_metadata, by = c("pathway_id", "description")) %>%
-  dplyr::filter( !grepl(pattern = "disease", x = category, perl = T, ignore.case = T) ) %>%
-  dplyr::arrange(desc(n))
-
-freq_dereg_enrich <- all_enrich %>%
-  dplyr::filter(pathway_id %in% frequently_dereg$pathway_id[frequently_dereg$n>2], !(sample %in% c("TCGA-GBM", "PDCL")) )
-
-data_commons <- freq_dereg_enrich %>%
-  dplyr::filter(fdr<0.1) %>%
-  dplyr::count(pathway_id, description, sample) %>%
-  dplyr::filter(n>1)
-
-merged_categ <- c(
-  "Autophagy" = "Autophagy",
-  "Cell Cycle" = "Cell Cycle",
-  "Cell-Cell communication" = "Cell-Cell communication",
-  "Cellular responses to stimuli" = "Cellular responses to stimuli",
-  "Chromatin organization" = "DNA Processess",
-  "Circadian Clock" = "Circadian Clock",
-  "DNA Repair" = "DNA Processess",
-  "DNA Replication" = "DNA Processess",
-  "Developmental Biology" = "Developmental Biology",
-  "Digestion and absorption" = "Organismal Systems",
-  "Disease" = "Disease",
-  "Drug ADME" = "Drug",
-  "Extracellular matrix organization" = "Extracellular matrix organization",
-  "Gene expression (Transcription)" = "DNA Processess",
-  "Hemostasis" = "Hemostasis",
-  "Immune System" = "Organismal Systems",
-  "Metabolism" = "Metabolism",
-  "Metabolism of RNA" = "Metabolism of RNA and proteins",
-  "Metabolism of proteins" = "Metabolism of RNA and proteins",
-  "Muscle contraction" = "Muscle contraction",
-  "Neuronal System" = "Organismal Systems",
-  "Organelle biogenesis and maintenance" = "",
-  "Programmed Cell Death" = "Cellular Processes",
-  "Protein localization" = "Protein localization",
-  "Reproduction" = "Reproduction",
-  "Sensory Perception" = "Organismal Systems",
-  "Signal Transduction" = "Signal Transduction and Transport",
-  "Transport of small molecules" = "Signal Transduction and Transport",
-  "Vesicle-mediated transport" = "Signal Transduction and Transport",
-  "Cellular Processes" = "Cellular Processes",
-  "Drug Development" = "Drug",
-  "Environmental Information Processing" = "Signal Transduction and Transport",
-  "Genetic Information Processing" = "DNA Processess",
-  "Human Diseases" = "Disease",
-  "Metabolism" = "Metabolism",
-  "Organismal Systems" = "Organismal Systems",
-  "Unknown" = "Unknown"
+reactome_selected_pathways <- c(
+  "R-HSA-112315",
+  "R-HSA-1650814",
+  "R-HSA-5576891",
+  "R-HSA-8948216",
+  "R-HSA-112314",
+  "R-HSA-191273",
+  "R-HSA-6790901",
+  "R-HSA-6794362",
+  "R-HSA-109581",
+  "R-HSA-1296071",
+  "R-HSA-1566948",
+  "R-HSA-157579",
+  "R-HSA-174417",
+  "R-HSA-187037",
+  "R-HSA-204998"
 )
 
-pdcl_names <- c(
-  "4339-p21",
-  "4371-p37",
-  "5706-p14",
-  "6190-p43",
-  "6240-p12",
-  "7015-p17",
-  "7060-p18", 
-  "7142-p14",
-  "N13-1300",
-  "N13-1520-p9",
-  "N14-0072",
-  "N14-0870",
-  "N14-1208",
-  "N14-1525",
-  "N15_0460",
-  "N15_0516",
-  "N15-0385",
-  "N15-0661",
-  "N16_0535",
-  "N16-0240"
-)
+reactome_selected_pathways_global <- all_enrichment_global %>% 
+  dplyr::filter(pathway_id %in% reactome_selected_pathways) %>%
+  dplyr::mutate(
+    sample = factor(sample, labels = c("PDCL", "TCGA-GBM")),
+    fdr = cut(fdr, breaks = fdr.breaks, labels = fdr.labels)
+  )
 
-data <- common_pdcl %>%
-  dplyr::inner_join(gs_metadata, by = c("pathway_id", "description")) %>%
-  dplyr::mutate(category_merged = merged_categ[category], sample = factor(sample, levels = pdcl_names) )
-# We remove the only unknown pâthway as it complikcates the viewing and does not
-# really affect the result
-# its  KEGG entry is path:hsa01240 - Biosynthesis of cofactors
-data <- data[data$category_merged != "Unknown",]
+heatmap_fdr_reactome_selected_global <- heatmap.fdr(reactome_selected_pathways_global) +
+  labs(title = "Heatmap FDR of Reactome pathways for analysis at Population scale")
 
-barplot_categ_pdcl <- ggplot(data, aes(sample, fill = category_merged)) +
+####### Combine FDR Heatmap
+
+heatmap_fdr_global <- cowplot::plot_grid(heatmap_fdr_kegg_selected_global, heatmap_fdr_reactome_selected_global, labels = c("A", "B"), nrow = 2)
+
+# ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/heatmap-fdr-global.png", plot = heatmap_fdr_global, width = 20, height = 10)
+
+######## Personnalized analysis PDCL
+
+################ Barplot Kegg Category
+
+kegg_significant_pdcl_personnalized <- get.signficant.pathways(all_enrichment_pdcl_personnalized, kegg_gs_metadata, threshold)
+
+order_kegg_significant_pdcl <- kegg_significant_pdcl_personnalized %>%
+  dplyr::count(sample) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::pull(sample)
+
+kegg_significant_pdcl_personnalized$sample <- factor(kegg_significant_pdcl_personnalized$sample, levels = order_kegg_significant_pdcl, ordered = T)
+
+barplot_kegg_categ_pdcl_personnalized <- ggplot(kegg_significant_pdcl_personnalized, aes(sample, fill = category)) +
   geom_bar() +
-  scale_fill_brewer(palette = "Paired") +
+  # scale_fill_brewer(palette = "Paired") +
   theme(axis.text.x = element_text(angle = 90) ) +
   labs(
-    title = "Count of deregulated pathways by samples and category",
+    title = "Count of deregulated pathways by samples and Kegg category",
     x = "Sample Name",
     y = "Count Pathways",
     fill = "Biological Category"
   ) +
   scale_x_discrete(drop = F)
 
-# ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/barplot-categ-pdcl.png", plot = barplot_categ_pdcl, width = 12, height = 7)
+################ Barplot Reactome Category
 
-data <- common_pdcl %>%
-  dplyr::inner_join(gs_metadata, by = c("pathway_id", "description")) %>%
-  dplyr::mutate(category_merged = merged_categ[category], sample = factor(sample, levels = pdcl_names) ) %>%
-  dplyr::count(category_merged)
+reactome_significant_pdcl_personnalized <- get.signficant.pathways(all_enrichment_pdcl_personnalized, reactome_gs_metadata, threshold)
 
-piechart_categ_pdcl <- plot_ly(data, labels =~category_merged, values =~n, type = 'pie') %>%
-  layout(
-    title = "Count of the number of pathways per category"
-  )
+order_reactome_significant_pdcl <- reactome_significant_pdcl_personnalized %>%
+  dplyr::count(sample) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::pull(sample)
 
-# save_image(piechart_categ_pdcl, "/home/spinicck/PhD/paper/analysis-pdcl/manuscript/img/piechart-categ-pdcl.png", scale = 2.0)
+reactome_significant_pdcl_personnalized$sample <- factor(reactome_significant_pdcl_personnalized$sample, levels = order_reactome_significant_pdcl, ordered = T)
+
+barplot_reactome_categ_pdcl_personnalized <- ggplot(reactome_significant_pdcl_personnalized, aes(sample, fill = category)) +
+  geom_bar() +
+  # scale_fill_brewer(palette = "Paired") +
+  theme(axis.text.x = element_text(angle = 90) ) +
+  labs(
+    title = "Count of deregulated pathways by samples and Reactome category",
+    x = "Sample Name",
+    y = "Count Pathways",
+    fill = "Biological Category"
+  ) +
+  scale_x_discrete(drop = F)
+
+################ Combine barplot
+
+barplot_categ_pdcl_personnalized <- cowplot::plot_grid(barplot_kegg_categ_pdcl_personnalized, barplot_reactome_categ_pdcl_personnalized, nrow = 2)
+
+# ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/barplot-categ-pdcl.png", plot = barplot_categ_pdcl_personnalized, width = 12, height = 7)
+
+################ Frequently Kegg deregulated
+
+freq_dereg_kegg_pdcl_personnalized <- kegg_significant_pdcl_personnalized %>% dplyr::filter(category != "Human Diseases") %>% dplyr::count(pathway_id, description, category) %>% dplyr::arrange(desc(n))
+
+################ Frequently Reactome deregulated
+
+freq_dereg_reactome_pdcl_personnalized <- reactome_significant_pdcl_personnalized %>% dplyr::filter(category != "Disease") %>% dplyr::count(pathway_id, description, category) %>% dplyr::arrange(desc(n))
+
+########### TODO: 
 
 selected_pathways <- c(
   "path:hsa04115",
@@ -224,155 +301,35 @@ selected_pathways <- c(
   "R-HSA-69190"
 )
 
-data <- all_enrich %>%
-  dplyr::filter(pathway_id %in% selected_pathways, !(sample %in% c("TCGA-GBM", "PDCL"))) %>%
-  dplyr::mutate(category = gs_metadata[pathway_id, "category"]) %>%
-  dplyr::arrange(category, description)
+data <- all_enrichment_pdcl_personnalized %>%
+  dplyr::filter(pathway_id %in% selected_pathways) 
 
 data$description <- sub(" - Homo sapiens \\(human\\)", "", data$description, ignore.case = T, perl = T)
 data$description <- str_c( data$description, data$pathway_id, sep = " - ")
+data$fdr <- cut(data$fdr, breaks = c(0.0, 0.01, 0.05, 0.1, 0.25, 0.50, 1.00), labels = c("0.01", "0.05", "0.1", "0.25", "0.50", "1.0"))
 
-data_commons <- common_pdcl[common_pdcl$pathway_id %in% selected_pathways, ]
-data_commons$description <- sub(" - Homo sapiens \\(human\\)", "", data_commons$description, ignore.case = T, perl = T)
-data_commons$description <- str_c( data_commons$description, data_commons$pathway_id, sep = " - ")
-data_commons <- data_commons %>%
-  dplyr::mutate(category = gs_metadata[pathway_id, "category"]) %>%
-  dplyr::arrange(category, description)
-
-data$description <- factor(data$description, levels = unique(data$description), order = T)
-data_commons$description <- factor(data_commons$description, levels = unique(data_commons$description), order = T)
-
-heatmap_fdr_pathway <- heatmap.fdr(data, data_commons) +
-  scale_y_discrete(limits = rev) +
-  facet_wrap(vars(method)) +
+heatmap_fdr_pathway <- ggplot(
+  data = data, 
+  aes(x = sample, y = description, fill =  fdr)
+) +
+  geom_tile() +
   labs(
-    title = "FDR value for each samples in the PDCL datasets in G:Profiler and GSEA",
-    x = "Sample"
+    title = "Pathways FDR value by PDCL",
+    x = "PDCL",
+    y = "Pathway",
+    fill = "FDR"
+  ) +
+  scale_fill_brewer(
+    palette = "RdBu",
+    na.value = "gray30"
+  ) +
+  #We need to specify this. If not, unpopulated categories do not appear
+  scale_x_discrete(drop = F) +
+  # By default it is sorted in desc order, we reverse it so it is in asc order
+  # scale_y_discrete(limits=rev) +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    panel.background = element_rect(fill = "white")
   )
 
 # ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/heatmap-fdr-pathway.png", plot = heatmap_fdr_pathway, width = 12, height = 7)
-
-all_commons <- all_enrich %>%  
-  dplyr::filter(fdr < 0.1) %>%
-  dplyr::count(pathway_id, description, sample) %>%
-  dplyr::filter(n>=2) %>%
-  dplyr::mutate(category = gs_metadata[pathway_id, "category"]) %>%
-  dplyr::mutate(category_merged = merged_categ[category])
-
-count_tcga_commons <- all_commons %>%
-  dplyr::filter(sample == "TCGA-GBM") %>%
-  dplyr::count(category_merged)
-count_pdcl_commons <- all_commons %>%
-  dplyr::filter(sample == "PDCL") %>%
-  dplyr::count(category_merged)
-count_pdcl_personnalized_commons <- all_commons %>%
-  dplyr::filter(!(sample %in% c("TCGA-GBM", "PDCL"))) %>%
-  dplyr::distinct(pathway_id, description, category_merged) %>%
-  dplyr::count(category_merged)
-
-piechart_count_category <- plot_ly() %>% 
-  add_pie(data = count_tcga_commons, labels =~category_merged, values =~n, domain = list(row = 0, column = 0), textinfo ="value", 
-          textfont = list(size = 24)) %>%
-  add_pie(data = count_pdcl_commons, labels =~category_merged, values =~n, domain = list(row = 0, column = 1), textinfo ="value", 
-          textfont = list(size = 24)) %>% 
-  add_pie(data = count_pdcl_personnalized_commons, labels =~category_merged, values =~n, domain = list(row = 0, column = 2), textinfo ="value", 
-          textfont = list(size = 24)) %>%
-  layout(
-    title = list(
-      text = "Count pathways per category for each analysis",
-      font = list(size = 32),
-      y = 1.0,
-      yref = "paper",
-      yanchor = "top"
-    ),
-    legend = list(
-      title = list(text="Category"),
-      font = list(size = 24),
-      y = 0.5,
-      yref = "paper",
-      yanchor = "middle"
-    ),
-    grid = list(rows = 1, columns = 3),
-    annotations = list(
-      list(
-        text = "TCGA",
-        x = 0.15,
-        y = 0.9,
-        xref = "paper",
-        yref = "paper",
-        xanchor = "center",
-        yanchor = "top",  
-        showarrow = FALSE,
-        font = list(size = 24)
-      ),
-      list(
-        text="PDCL",
-        x = 0.5,
-        y = 0.9,
-        xref = "paper",
-        yref = "paper",
-        xanchor = "center",
-        yanchor = "top",  
-        showarrow = FALSE,
-        font = list(size = 24)
-      ),
-      list(
-        text="PDCL Personnalized",
-        x = 0.85,
-        y = 0.9,
-        xref = "paper",
-        yref = "paper",
-        xanchor = "center",
-        yanchor = "top",  
-        showarrow = FALSE,
-        font = list(size = 24)
-      )
-    )
-  )
-# save_image(piechart_count_category, "/home/spinicck/PhD/paper/analysis-pdcl/manuscript/img/complete-piechart-categ-pdcl.png", width = 2000, height = 800, scale = 2)
-
-piechart_count_category <- plot_ly() %>% 
-  add_pie(data = count_tcga_commons, labels =~category_merged, values =~n, domain = list(row = 0, column = 0), textinfo ="value" ) %>%
-  add_pie(data = count_pdcl_commons, labels =~category_merged, values =~n, domain = list(row = 0, column = 1), textinfo ="value" ) %>% 
-  layout(
-    title = list(
-      text = "Count pathways per category for each datasets",
-      font = list(size = 32),
-      y = 1.0,
-      yref = "paper",
-      yanchor = "top"
-    ),
-    legend = list(
-      title = list(text="Category"),
-      font = list(size = 24),
-      y = 0.5,
-      yref = "paper",
-      yanchor = "middle"
-    ),
-    grid = list(rows = 1, columns = 2),
-    annotations = list(
-      list(
-        text = "TCGA-GBM",
-        x = 0.25,
-        y = 0.95,
-        xref = "paper",
-        yref = "paper",
-        xanchor = "center",
-        yanchor = "top",  
-        showarrow = FALSE,
-        font = list(size = 24)
-      ),
-      list(
-        text="PDCL",
-        x = 0.75,
-        y = 0.95,
-        xref = "paper",
-        yref = "paper",
-        xanchor = "center",
-        yanchor = "top",  
-        showarrow = FALSE,
-        font = list(size = 24)
-      )
-    )
-  )
-# save_image(piechart_count_category, "/home/spinicck/PhD/paper/analysis-pdcl/manuscript/img/complete-piechart-categ-pdcl.png", width = 2000, height = 1000, scale = 2)
