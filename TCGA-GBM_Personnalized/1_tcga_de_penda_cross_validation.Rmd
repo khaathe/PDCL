@@ -48,7 +48,7 @@ result_dir = "Result_1_tcga_de_penda_cross_validation/"
 
 ## Prepare Count-Data
 
-```{r prepare-count-data}
+```{r prepare-count-data-hbm-crontrols, eval = F, include=F}
 # Load counts and metadata
 hbm_count <- read.csv(TCGA_DATASET_PARAM$hbm_count_path, check.names = F)
 hbm_metadata <- read.csv(TCGA_DATASET_PARAM$hbm_metadata_path)
@@ -76,6 +76,20 @@ count_metadata$condition <- as.factor(count_metadata$condition)
 # Update control index and names
 control_index <- which(count_metadata$source == "hbm" | count_metadata$sample_type == "Solid Tissue Normal")
 control_names <- colnames(count_data)[control_index]
+```
+
+```{r prepare-count-data-tcga-controls-only, eval = T, include=T}
+count_data <- read.table(TCGA_DATASET_PARAM$tcga_count_path, sep = "\t", header = T, check.names = F)
+count_data <- count_data[isUnique(count_data$gene_name),]
+row.names(count_data) <- count_data$gene_name
+count_data <- count_data[, !(colnames(count_data) %in% c("gene_name", "gene_id"))]
+# Create Metadata
+count_metadata <- read.table(TCGA_DATASET_PARAM$tcga_metadata_path, sep = "\t", header = T)
+count_metadata$condition <- "tumour"
+# Find controls
+control_index <- which(count_metadata$Sample.Type == "Solid Tissue Normal")
+control_names <- colnames(count_data)[control_index]
+count_metadata$condition[control_index] <- "control"
 ```
 
 ## Pseudo-log Normalization
