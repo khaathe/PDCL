@@ -21,6 +21,7 @@ library(BiocParallel)
 
 # Source files with functions used in next steps
 source("../Code/R/tcga-dataset.R")
+source("../Code/R/process-result.R")
 
 multicoreParam <- BiocParallel::MulticoreParam(workers = 1)
 register(multicoreParam)
@@ -207,33 +208,20 @@ all_penda_res <- xfun::cache_rds({
 ## Common Deregulations
 
 ```{r common-dereg-percentage, echo = FALSE, fig.width=12, fig.height=8}
+all_penda_res <- penda.res.sort(all_penda_res, keep.sample = c(-1,-2), gene.domain = row.names(penda_res) )
+
 results_combination <- combn(1:length(all_penda_res), 2, simplify = F)
 common_dereg_percentage <- purrr::imap_dfr(results_combination, function(combination, i){
   index_res1 <- combination[1]
   index_res2 <- combination[2]
   res1 <- all_penda_res[[index_res1]]
   res2 <- all_penda_res[[index_res2]]
-  if( any(dim(res1$down_genes) != dim(res2$down_genes)) | any(dim(res1$up_genes) != dim(res2$up_genes)) ){
-    warning("Down or Up genes matrix dimensions don't match between ", index_res1, " and ", index_res2, ". Returning 0% commons deregulation.")
-    return( data.frame(sample = colnames(res1$down), down = 0, up = 0, combination_numb = i, combination_pair = paste0(combination, collapse = "-"), row.names = NULL) )
-  }
-  res1 <- lapply(all_penda_res[[index_res1]], function(x){
-    x[, !(colnames(x) %in% control_names)]
-    x <- x[order(row.names(x)),]
-    x
-  })
-  res2 <- lapply(all_penda_res[[index_res2]], function(x){
-    x[, !(colnames(x) %in% control_names)]
-    x <- x[order(row.names(x)),]
-    x
-  })
-  down_commons <- colSums(res1$down & res2$down)/colSums(res1$down | res2$down)
-  up_commons <- colSums(res1$up & res2$up)/colSums(res1$up | res2$up)
-  data.frame(sample = colnames(res1$down), down=down_commons, up = up_commons, combination_numb = i, combination_pair = paste0(combination, collapse = "-"), row.names = NULL)
+  down_commons <- sum(res1$down == res2$down)/length(res1$down)
+  up_commons <- sum(res1$up == res2$up)/length(res1$up)
+  data.frame(down=down_commons, up = up_commons, combination_numb = i)
 })
 
 data <- common_dereg_percentage %>%
-  dplyr::filter(!(sample %in% control_names)) %>%
   tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
   dplyr::mutate(run = as.factor(combination_numb))
 
@@ -242,6 +230,8 @@ plot_common_dereg_percent <- ggplot(data, aes(x = run, y = percent, colour = der
   geom_hline(yintercept = 0.97, colour = "red", alpha = 0.6) 
 
 plot_common_dereg_percent
+
+dereg_matrix <- get.penda.final.matrix(all_penda_res, sort = F, gene.domain = row.names(penda_res) )
 ```
 
 ```{r dereg-perecent}
