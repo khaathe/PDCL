@@ -33,7 +33,9 @@ validation_datasets_param <- list(
 penda_datasets_param <- list(
   detectlowvalue = T, 
   detectNA = T, 
-  threshold = 0.99
+  threshold = 0.99,
+  val_min = NA,
+  bimod = F
 )
 penda_L_H_params <- list(
   threshold = 0.99, 
@@ -162,7 +164,7 @@ all_penda_datasets <- xfun::cache_rds({
       index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
       cases <- all_data[,-index_ctrl_set]
       ctrl <- all_data[,index_ctrl_set]
-      penda::make_dataset(ctrl, cases, detectlowvalue = detectlowvalue, detectNA = detectNA, threshold = threshold)
+      penda::make_dataset(ctrl, cases, detectlowvalue = detectlowvalue, detectNA = detectNA, threshold = threshold, val_min = val_min, bimod = bimod)
     })
   })
 }, rerun = rerun_cache, file = "all_penda_datasets.rds", dir = result_dir)
