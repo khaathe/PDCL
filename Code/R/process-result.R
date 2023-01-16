@@ -253,3 +253,46 @@ heatmap.fdr <- function(collapsed.by.method, highlight.pathways=NULL){
   }
   heatmap_fdr
 }
+
+penda.res.sort <- function(penda.result.list, gene.domain, keep.sample = TRUE){
+  lapply(penda.result.list, function(p){
+    u <- p$up_genes[,keep.sample] # UP penda-matrix with samples filtered
+    d <- p$down_genes[,keep.sample] # DOWN penda-matrix with samples filtered
+    i <- which( !(gene.domain %in% row.names(u)) )
+    g <- gene.domain[i] 
+    # Create a matrix of the missing genes
+    mg <- matrix(FALSE, nrow = length(g), ncol = ncol(u), dimnames = list(g, colnames(u)) )
+    # Add missing genes to u and d
+    u <- rbind(u, mg)
+    d <- rbind(d, mg)
+    
+    u <- u[order(match(row.names(u), gene.domain)), ]
+    d <- d[order(match(row.names(d), gene.domain)), ]
+    
+    list(up_genes = u, down_genes = d)
+  })
+}
+
+get.penda.final.matrix <- function(penda.result.list, gene.domain = NULL, sort = T, ...){
+  if (is.null(gene.domain)){
+    gene.domain <- c()
+    # for(p in penda.result.list) { gene.domain <- c(gene.domain, row.names(p$up_genes)) }
+    gene.domain <- sapply(penda.result.list, function(p){ gene.domain <- c(gene.domain, row.names(p$up_genes)) })
+    gene.domain <- sort(unique(gene.domain))
+  }
+  
+  po.list <- if (sort) penda.res.sort(penda.result.list, gene.domain = gene.domain, ...) else penda.result.list
+  
+  up_genes <- po.list[[1]]$up_genes
+  down_genes <- po.list[[1]]$down_genes
+  for (po in po.list[2:length(po.list)]){
+    up_genes <- (up_genes & po$up_genes)
+    down_genes <- (down_genes & po$down_gene)
+  }
+  
+  dereg_matrix <- matrix(0, nrow = nrow(up_genes), ncol = ncol(up_genes), dimnames = list(row.names(up_genes), colnames(up_genes)))
+  dereg_matrix[up_genes] <- 1
+  dereg_matrix[down_genes] <- -1
+  
+  dereg_matrix
+}
