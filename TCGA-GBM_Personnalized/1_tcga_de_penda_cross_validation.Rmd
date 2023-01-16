@@ -17,9 +17,13 @@ library(mclust)
 library(factoextra)
 library(penda)
 library(DESeq2)
+library(BiocParallel)
 
 # Source files with functions used in next steps
 source("../Code/R/tcga-dataset.R")
+
+multicoreParam <- BiocParallel::MulticoreParam(workers = 1)
+register(multicoreParam)
 
 validation_datasets_param <- list(
   nb_validation_run = 1,
@@ -151,7 +155,7 @@ validation_ctrl <- lapply(1:validation_datasets_param$nb_validation_run, functio
 
 all_penda_datasets <- xfun::cache_rds({
   with(penda_datasets_param, {
-    lapply(1:validation_datasets_param$nb_validation_run, function(i){
+    BiocParallel::bplapply(1:validation_datasets_param$nb_validation_run, function(i){
       validation_ctrl_set <- validation_ctrl[[i]]
       names_ctrl_set <- control_names[!(control_names %in% validation_ctrl_set)]
       index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
@@ -167,7 +171,7 @@ all_penda_datasets <- xfun::cache_rds({
 
 ```{r compute-L-H-lists}
 all_L_H_list <- with(penda_L_H_params, {
-  lapply(all_penda_datasets, function(penda_dataset){
+  BiocParallel::bplapply(all_penda_datasets, function(penda_dataset){
     penda::compute_lower_and_higher_lists(penda_dataset$data_ctrl, threshold = threshold, s_max = s_max)
   })
 })
@@ -183,7 +187,7 @@ We hide the results of this chunck because it will overload the doc with unneces
 ```{r run-penda, message=FALSE}
 all_penda_res <- xfun::cache_rds({
   with(penda_test_param, {
-    lapply(1:length(all_penda_datasets), function(i){
+    BiocParallel::bplapply(1:length(all_penda_datasets), function(i){
       penda_dataset <- all_penda_datasets[[i]]
       L_H_list <- all_L_H_list[[i]]
       penda::penda_test(
