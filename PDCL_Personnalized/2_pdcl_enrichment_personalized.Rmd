@@ -115,7 +115,10 @@ all_gs_metadata <- rbind(kegg_gs_metadata, react_gs_metadata)
 # Collapse the results by method.
 # One line contain the result of one enrichment method for one pathway of one PDCL
 gs_category <- all_gs_metadata %>% dplyr::select(pathway_id, category)
-all_enrich_collapsed <- collapse.enrichment(all_enrichment) %>% dplyr::inner_join(gs_category)
+all_enrich_collapsed <- xfun::cache_rds({
+  collapse.enrichment(all_enrichment)
+}, file = "all_enrichment.rds", dir = result_dir, rerun = rerun_rds_cached)
+all_enrich_collapsed <- all_enrich_collapsed %>% dplyr::inner_join(gs_category)
 threshold <- 0.05
 ```
 
