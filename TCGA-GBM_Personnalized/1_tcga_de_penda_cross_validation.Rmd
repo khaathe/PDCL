@@ -210,7 +210,7 @@ all_penda_res <- xfun::cache_rds({
 ## Common Deregulations
 
 ```{r common-dereg-percentage, echo = FALSE, fig.width=12, fig.height=8}
-all_penda_res <- penda.res.sort(all_penda_res, keep.sample = c(-1,-2), gene.domain = row.names(penda_res) )
+all_penda_res <- penda.res.sort(all_penda_res, gene.domain = row.names(count_data) )
 
 results_combination <- combn(1:length(all_penda_res), 2, simplify = F)
 common_dereg_percentage <- purrr::imap_dfr(results_combination, function(combination, i){
@@ -232,8 +232,6 @@ plot_common_dereg_percent <- ggplot(data, aes(x = run, y = percent, colour = der
   geom_hline(yintercept = 0.97, colour = "red", alpha = 0.6) 
 
 plot_common_dereg_percent
-
-dereg_matrix <- get.penda.final.matrix(all_penda_res, sort = F, gene.domain = row.names(penda_res) )
 ```
 
 ```{r dereg-perecent}
