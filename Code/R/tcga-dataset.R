@@ -17,5 +17,5 @@ TCGA_DATASET_PARAM <- list(
     "S020722_L4.LB25",
     "477a4ae1-84c0-49f2-b3b3-4015b8c26f18"
     ),
-  "penda_result" = "penda_result_tcga_gbm.rds"
+  "penda_result" = "../Data/tcga-dataset/results_penda_tcga_gbm_project_only.rds"
 ) 

@@ -88,13 +88,13 @@ all_res <- list()
 ```
 
 ```{r run-gprofiler}
-all_pdcl_genes <- row.names(penda_res)
+all_tcga_genes <- row.names(penda_res)
 all_gene_list <- lapply(penda_res, function(x){
-  all_pdcl_genes[x != 0]
+  all_tcga_genes[which(x != 0)]
 })
 # Use RDS caching as G:Profiler run are long for 20 samples
 all_res[["G:Profiler"]] <- xfun::cache_rds({
-  run.gost(all_gene_list, gprofiler_gmt_list, all_pdcl_genes)
+  run.gost(all_gene_list, gprofiler_gmt_list, all_tcga_genes)
 }, file = "gprofiler_result", dir = result_dir, rerun = rerun_rds_cached)
 ```
 
@@ -115,7 +115,10 @@ all_gs_metadata <- rbind(kegg_gs_metadata, react_gs_metadata)
 # Collapse the results by method.
 # One line contain the result of one enrichment method for one pathway of one PDCL
 gs_category <- all_gs_metadata %>% dplyr::select(pathway_id, category)
-all_enrich_collapsed <- collapse.enrichment(all_enrichment) %>% dplyr::inner_join(gs_category)
+all_enrich_collapsed <- xfun::cache_rds({
+  collapse.enrichment(all_enrichment)
+}, file = "all_enrichment.rds", dir = result_dir, rerun = rerun_rds_cached)
+all_enrich_collapsed <- all_enrich_collapsed %>% dplyr::inner_join(gs_category)
 threshold <- 0.05
 ```
 
