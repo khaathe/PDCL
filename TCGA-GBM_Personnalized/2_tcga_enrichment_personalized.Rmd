@@ -94,13 +94,13 @@ all_gene_list <- lapply(penda_res, function(x){
 })
 # Use RDS caching as G:Profiler run are long for 20 samples
 all_res[["G:Profiler"]] <- xfun::cache_rds({
-  run.gost(all_gene_list, gprofiler_gmt_list, all_tcga_genes)
+  run.multi.gost(all_gene_list, gprofiler_gmt_list, all_tcga_genes)
 }, file = "gprofiler_result", dir = result_dir, rerun = rerun_rds_cached)
 ```
 
 ```{r convert-to-enrichment} 
 all_enrichment <- list()
-all_enrichment[["G:Profiler"]] <- map_depth(all_res[["G:Profiler"]], .depth = 1, .f = convert.gost.to.enrichment)
+all_enrichment[["G:Profiler"]] <- map_depth(all_res[["G:Profiler"]], .depth = 1, .f = convert.multi.gost.to.enrichment, colnames(penda_res))
 ```
 
 <!-- Retrieve Categories for enriched pathways -->

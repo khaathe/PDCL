@@ -2,6 +2,22 @@
 library(gprofiler2)
 library(dplyr)
 
+# Run one multi-query G:Profiler analysis and return a list of result per sample for each GMTs
+# Return : list[[GMTs]][[sample]]
+run.multi.gost <- function(all.gene.list, gmt.list, domain, alpha = 0.05, only_significant = F, adjustment.method = "fdr", return.genes = T){
+  lapply(gmt.list, function(gmt){
+    gost(
+      query = all.gene.list,
+      organism = gmt,
+      user_threshold = alpha,
+      significant = only_significant,
+      correction_method = adjustment.method,
+      evcodes = return.genes,
+      custom_bg = domain
+    )
+  })
+}
+
 # Run Multiple G:Profiler analysis and return a list of result per sample for each GMTs
 # Return : list[[GMTs]][[sample]]
 run.gost <- function(all.gene.list, gmt.list, domain, alpha = 0.05, only_significant = F, adjustment.method = "fdr", return.genes = T){
@@ -27,6 +43,22 @@ convert.gost.to.enrichment <- function(res){
     x$result %>% dplyr::rename(pathway_id = term_id, description = term_name, genes = intersection) %>%
       mutate(fdr = p_value, phenotype = 1) %>%
       select(pathway_id,description, p_value, fdr, phenotype, genes)
+  })
+}
+
+# Convert a list of Gost Analysis result to a list of Data Frame containing the column in the Generic Enrichment Map (GEM)
+# as described in G:Profiler documentation (https://cran.r-project.org/web/packages/gprofiler2/vignettes/gprofiler2.html#enrichment-analysis)
+convert.multi.gost.to.enrichment <- function(res,samples){
+  lapply(res, function(x){
+    l <- lapply(samples, function(s){
+      x$result %>% 
+        dplyr::filter(grepl(s, query, perl = TRUE)) %>%
+        dplyr::rename(pathway_id = term_id, description = term_name, genes = intersection) %>%
+        mutate(fdr = p_value, phenotype = 1) %>%
+        select(pathway_id,description, p_value, fdr, phenotype, genes)
+    })
+    names(l) <- samples
+    l
   })
 }
 
