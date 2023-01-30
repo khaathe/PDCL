@@ -20,6 +20,50 @@ run.multi.gost <- function(all.gene.list, gmt.list, domain, alpha = 0.05, only_s
 
 # Run Multiple G:Profiler analysis and return a list of result per sample for each GMTs
 # Return : list[[GMTs]][[sample]]
+run.parralelized.gost <- function(all.gene.list, gmt.list, domain, alpha = 0.05, only_significant = F, adjustment.method = "fdr", return.genes = T){
+  # Create a list to loop over for BiocParallel to avoid creating a nested 
+  # for-loop  to parallelize
+  iter <- list()
+  imap(gmt.list, function(gmt, db){
+    imap(all.gene.list, function(gene.list, sample){
+      el <- list(gene.list = gene.list, gmt = gmt, db = db, sample = sample)
+      # append insert all element of a list at the end
+      # We store el in a list to add it as one element of the list.
+      iter <<- BiocGenerics::append(iter, list(el))
+    })
+  })
+  
+  # Loop over the list iter to run parallelized gost analysis.
+  bioc_results <- BiocParallel::bplapply(iter, function(x, domain, alpha, only_significant, adjustment.method, return.genes){
+    with(x,{
+      res <- list(gostres = NULL, db = db, sample = sample)
+      res$gostres <- gost(
+        query = gene.list,
+        organism = gmt,
+        user_threshold = alpha,
+        significant = only_significant,
+        correction_method = adjustment.method,
+        evcodes = return.genes,
+        custom_bg = domain
+      )
+      res
+    })
+  }, domain, alpha, only_significant, adjustment.method, return.genes)
+  
+  # Loop over the gost results and recreate the hierarchy used by other
+  # functions to process results.
+  results <- list()
+  lapply(bioc_results, function(b){
+    with(b, {
+      results[[db]][[sample]] <<- gostres
+    })
+  })
+  
+  return(results)
+}
+
+# Run Parallelized Multiple G:Profiler analysis and return a list of result per sample for each GMTs
+# Return : list[[GMTs]][[sample]]
 run.gost <- function(all.gene.list, gmt.list, domain, alpha = 0.05, only_significant = F, adjustment.method = "fdr", return.genes = T){
   lapply(gmt.list, function(gmt){
     lapply(all.gene.list, function(gene.list){
