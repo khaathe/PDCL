@@ -159,7 +159,7 @@ enriched_categories_kegg <- ggplot(
     fill = "Count"
   ) +
   scale_fill_viridis_c(direction = 1) +
-  theme(axis.text.x = element_text(angle = 90) ) +
+  theme(axis.text.x = element_blank() ) +
   # By default it is sorted in desc order, we reverse it so it is in asc order
   scale_y_discrete(limits=rev)
 enriched_categories_kegg
@@ -180,7 +180,7 @@ data <- kegg_significant %>%
 barplot_kegg_categories <- ggplot(data, aes(x = sample, fill = category)) +
   geom_bar() +
   scale_x_discrete(drop = FALSE) +
-  theme(axis.text.x = element_text(angle = 90) )
+  theme(axis.text.x = element_blank() )
 barplot_kegg_categories
 ```
 
@@ -192,7 +192,7 @@ barplot_kegg_categories
 
 ```{r heatmap-fdr-kegg-metabolism-cellular-processes, fig.width=18, fig.height=12}
 data <- prepare.fdr.data(kegg_significant$pathway_id, "\\bmetabolism|cellular\\s+processes\\b")
-heatmap_fdr_kegg_metabolism_ecm <- heatmap.fdr(data)
+heatmap_fdr_kegg_metabolism_ecm <- heatmap.fdr(data) + theme(axis.text.x = element_blank() )
 heatmap_fdr_kegg_metabolism_ecm
 ```
 
@@ -200,7 +200,7 @@ heatmap_fdr_kegg_metabolism_ecm
 
 ```{r heatmap-fdr-kegg-organismal-systems, fig.width=18, fig.height=12}
 data <- prepare.fdr.data(kegg_significant$pathway_id, "organismal\\s+systems")
-heatmap_fdr_kegg_cell_cycle_signal <- heatmap.fdr(data)
+heatmap_fdr_kegg_cell_cycle_signal <- heatmap.fdr(data) + theme(axis.text.x = element_blank() )
 heatmap_fdr_kegg_cell_cycle_signal
 ```
 
@@ -301,7 +301,7 @@ enriched_categories_reactome <- ggplot(
     fill = "Count"
   ) +
   scale_fill_viridis_c(direction = 1) +
-  theme(axis.text.x = element_text(angle = 90) ) +
+  theme(axis.text.x = element_blank() ) +
   # By default it is sorted in desc order, we reverse it so it is in asc order
   scale_y_discrete(limits=rev)
 enriched_categories_reactome
@@ -322,7 +322,7 @@ data <- reactome_significant %>%
 barplot_reactome_categories <- ggplot(data, aes(x = sample, fill = category)) +
   geom_bar() +
   scale_x_discrete(drop = FALSE) +
-  theme(axis.text.x = element_text(angle = 90) )
+  theme(axis.text.x = element_blank() )
 barplot_reactome_categories
 ```
 
@@ -334,7 +334,7 @@ barplot_reactome_categories
 
 ```{r heatmap-fdr-reactome-metabolism-ecm, fig.width=18, fig.height=12}
 data <- prepare.fdr.data(reactome_significant$pathway_id, "\\bmetabolism|matrix\\b")
-heatmap_fdr_reactome_metabolism_ecm <- heatmap.fdr(data)
+heatmap_fdr_reactome_metabolism_ecm <- heatmap.fdr(data) + theme(axis.text.x = element_blank() )
 heatmap_fdr_reactome_metabolism_ecm
 ```
 
@@ -342,7 +342,7 @@ heatmap_fdr_reactome_metabolism_ecm
 
 ```{r heatmap-fdr-reactome-cell-cycle-and-signalling, fig.width=18, fig.height=12}
 data <- prepare.fdr.data(reactome_significant$pathway_id, "\\b(cell.*|dna|signal|processing)\\b")
-heatmap_fdr_reactome_cell_cycle_signal <- heatmap.fdr(data)
+heatmap_fdr_reactome_cell_cycle_signal <- heatmap.fdr(data) + theme(axis.text.x = element_blank() )
 heatmap_fdr_reactome_cell_cycle_signal
 ```
 
@@ -428,7 +428,7 @@ count_enriched_method <- ggplot(
   theme(
     plot.title = element_text(hjust = 0.5)
   ) +
-  theme(axis.text.x = element_text(angle = 90) )
+  theme(axis.text.x = element_blank() )
 count_enriched_method
 ```
 
