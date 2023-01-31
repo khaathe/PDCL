@@ -117,7 +117,7 @@ all_gs_metadata <- rbind(kegg_gs_metadata, react_gs_metadata)
 
 ```{r collapse-by-method}
 # Collapse the results by method.
-# One line contain the result of one enrichment method for one pathway of one PDCL
+# One line contain the result of one enrichment method for one pathway of one sample
 gs_category <- all_gs_metadata %>% dplyr::select(pathway_id, category)
 all_enrich_collapsed <- xfun::cache_rds({
   collapse.enrichment(all_enrichment)
@@ -153,8 +153,8 @@ enriched_categories_kegg <- ggplot(
 ) + 
   geom_raster() +
   labs(
-    title = "Number of pathways enriched in each categories for each PDCL",
-    x = "PDCL",
+    title = "Number of pathways enriched in each categories for each Sample",
+    x = "Sample Name",
     y = "Categories",
     fill = "Count"
   ) +
@@ -168,14 +168,14 @@ enriched_categories_kegg
 ### Barplot Categories
 
 ```{r common-pathways-kegg, fig.width=14, fig.height=8}
-rank_pdcl <- kegg_significant %>%
-  dplyr::mutate(sample = factor(sample, levels = PDCL_DATASET_PARAM$pdcl_sample_names)) %>%
+rank_samples <- kegg_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = colnames(penda_res))) %>%
   dplyr::count(sample, .drop = FALSE) %>%
   dplyr::arrange(desc(n)) %>%
   dplyr::pull(sample)
 
 data <- kegg_significant %>%
-  dplyr::mutate(sample = factor(sample, levels = rank_pdcl))
+  dplyr::mutate(sample = factor(sample, levels = rank_samples))
 
 barplot_kegg_categories <- ggplot(data, aes(x = sample, fill = category)) +
   geom_bar() +
@@ -184,7 +184,7 @@ barplot_kegg_categories <- ggplot(data, aes(x = sample, fill = category)) +
 barplot_kegg_categories
 ```
 
-# Enrichment Per PDCL {data-navmenu="Kegg"}
+# Enrichment Per Samples {data-navmenu="Kegg"}
 
 ## {.tabset}
 
@@ -295,8 +295,8 @@ enriched_categories_reactome <- ggplot(
 ) + 
   geom_raster() +
   labs(
-    title = "Number of pathways enriched in each categories for each PDCL",
-    x = "PDCL",
+    title = "Number of pathways enriched in each categories for each sample",
+    x = "Sample name",
     y = "Categories",
     fill = "Count"
   ) +
@@ -310,14 +310,14 @@ enriched_categories_reactome
 ### Barplot Categories
 
 ```{r common-pathways-reactome, fig.width=14, fig.height=8}
-rank_pdcl <- reactome_significant %>%
-  dplyr::mutate(sample = factor(sample, levels = PDCL_DATASET_PARAM$pdcl_sample_names)) %>%
+rank_samples <- reactome_significant %>%
+  dplyr::mutate(sample = factor(sample, levels = colnames(penda_res))) %>%
   dplyr::count(sample, .drop = FALSE) %>%
   dplyr::arrange(desc(n)) %>%
   dplyr::pull(sample)
 
 data <- reactome_significant %>%
-  dplyr::mutate(sample = factor(sample, levels = rank_pdcl))
+  dplyr::mutate(sample = factor(sample, levels = rank_samples))
 
 barplot_reactome_categories <- ggplot(data, aes(x = sample, fill = category)) +
   geom_bar() +
@@ -326,7 +326,7 @@ barplot_reactome_categories <- ggplot(data, aes(x = sample, fill = category)) +
 barplot_reactome_categories
 ```
 
-# Enrichment Per PDCL {data-navmenu="Reactome"}
+# Enrichment Per Sample {data-navmenu="Reactome"}
 
 ## {.tabset}
 
@@ -421,7 +421,7 @@ count_enriched_method <- ggplot(
   geom_bar(position = "dodge2") +
   labs(
     title = "Number of enriched pathways per databases",
-    x = "PDCL sample",
+    x = "Sample name",
     y = "Counts",
     fill = ""
   ) +
