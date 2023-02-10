@@ -1,21 +1,30 @@
 library(ggplot2)
 library(plotly)
 library(tidyverse)
+library(viridis)
 library(reticulate)
+library(pheatmap)
 reticulate::use_python("/usr/bin/python3")
 reticulate::py_run_string("import sys")
+
+source("~/PhD/Project/PDCL/Code/R/process-result.R")
+
+####### Path to Data
 
 pdcl_global_rds <- "~/PhD/tmp/all_enrichment_pdcl_global.rds"
 tcga_global_rds <- "~/PhD/tmp/all_enrichment_tcga_global.rds"
 pdcl_personnalized <- "~/PhD/tmp/all_enrichment_pdcl_personnalized.rds"
+tcga_personnalized <- "~/PhD/tmp/2_tcga_enrichment_personnalized/Result_2_tcga_enrichment_personnalized/all_enrichment_1c40087720a184b034f39ff6b6f5b872.rds"
 kegg_gs_md_file <- "~/PhD/Project/PDCL/Data/gene-set/kegg_geneset_metadata.csv"
 reactome_gs_md_file <- "~/PhD/Project/PDCL/Data/gene-set/reactome_geneset_metadata.csv"
+summary_dereg <- readRDS("~/PhD/Project/PDCL/Data/tcga-dataset/penda_dereg_freq_tcga_gbm_project_only.rds")
 
 ####### Load Data
 
 all_enrichment_pdcl_global <- readRDS(pdcl_global_rds)
 all_enrichment_tcga_global <- readRDS(tcga_global_rds)
 all_enrichment_pdcl_personnalized <- readRDS(pdcl_personnalized)
+all_enrichment_tcga_personnalized <- readRDS(tcga_personnalized)
 
 all_enrich <- rbind(all_enrichment_pdcl_global, all_enrichment_tcga_global, all_enrichment_pdcl_personnalized)
 
@@ -272,7 +281,8 @@ freq_dereg_kegg_pdcl_personnalized <- kegg_significant_pdcl_personnalized %>% dp
 
 freq_dereg_reactome_pdcl_personnalized <- reactome_significant_pdcl_personnalized %>% dplyr::filter(category != "Disease") %>% dplyr::count(pathway_id, description, category) %>% dplyr::arrange(desc(n))
 
-########### TODO: 
+########### Investigate selected pathways
+# TODO: Change the heatmap to another package to add a dendogram
 
 selected_pathways <- c(
   "path:hsa04115",
@@ -333,3 +343,245 @@ heatmap_fdr_pathway <- ggplot(
   )
 
 # ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/heatmap-fdr-pathway.png", plot = heatmap_fdr_pathway, width = 12, height = 7)
+
+######## Personnalized analysis TCGA-GBM
+
+################ Barplot Kegg Category
+
+kegg_significant_tcga_personnalized <- get.signficant.pathways(all_enrichment_tcga_personnalized, kegg_gs_metadata, threshold)
+
+order_kegg_significant_pdcl <- kegg_significant_tcga_personnalized %>%
+  dplyr::count(sample) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::pull(sample)
+
+kegg_significant_tcga_personnalized$sample <- factor(kegg_significant_tcga_personnalized$sample, levels = order_kegg_significant_pdcl, ordered = T)
+
+barplot_kegg_categ_tcga_personnalized <- ggplot(kegg_significant_tcga_personnalized, aes(sample, fill = category)) +
+  geom_bar() +
+  # scale_fill_brewer(palette = "Paired") +
+  theme(axis.text.x = element_blank()) +
+  labs(
+    title = "Count of deregulated pathways by samples and Kegg category",
+    x = "Sample",
+    y = "Count Pathways",
+    fill = "Biological Category"
+  ) +
+  scale_x_discrete(drop = F)
+
+################ Barplot Reactome Category
+
+reactome_significant_tcga_personnalized <- get.signficant.pathways(all_enrichment_tcga_personnalized, reactome_gs_metadata, threshold)
+
+order_reactome_significant_tcga <- reactome_significant_tcga_personnalized %>%
+  dplyr::count(sample) %>%
+  dplyr::arrange(desc(n)) %>%
+  dplyr::pull(sample)
+
+reactome_significant_tcga_personnalized$sample <- factor(reactome_significant_tcga_personnalized$sample, levels = order_reactome_significant_tcga, ordered = T)
+
+barplot_reactome_categ_tcga_personnalized <- ggplot(reactome_significant_tcga_personnalized, aes(sample, fill = category)) +
+  geom_bar() +
+  # scale_fill_brewer(palette = "Paired") +
+  theme(axis.text.x = element_blank() ) +
+  labs(
+    title = "Count of deregulated pathways by samples and Reactome category",
+    x = "Sample",
+    y = "Count Pathways",
+    fill = "Biological Category"
+  ) +
+  scale_x_discrete(drop = F)
+
+################ Combine barplot
+
+barplot_categ_tcga_personnalized <- cowplot::plot_grid(barplot_kegg_categ_tcga_personnalized, barplot_reactome_categ_tcga_personnalized, nrow = 2)
+
+# ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/barplot-categ-tcga.png", plot = barplot_categ_tcga_personnalized, width = 12, height = 7)
+
+################ Frequently Kegg deregulated
+
+freq_dereg_kegg_tcga_personnalized <- kegg_significant_tcga_personnalized %>%
+  dplyr::filter(category != "Human Diseases") %>% 
+  dplyr::count(pathway_id, description, category) %>% 
+  dplyr::arrange(desc(n))
+
+################ Frequently Reactome deregulated
+
+freq_dereg_reactome_tcga_personnalized <- reactome_significant_tcga_personnalized %>%
+  dplyr::filter(category != "Disease") %>%
+  dplyr::count(pathway_id, description, category) %>%
+  dplyr::arrange(desc(n))
+
+########### Investigate selected pathways 
+# TODO: Change the heatmap to another package to add a dendogram
+
+selected_pathways <- c(
+  "path:hsa04115",
+  "R-HSA-69563",
+  "R-HSA-109581",
+  "R-HSA-1650814",
+  "R-HSA-8948216",
+  "R-HSA-1474290",
+  "path:hsa04512",
+  "R-HSA-1566948",
+  "path:hsa04510",
+  "path:hsa00190",
+  "R-HSA-5389840",
+  "R-HSA-611105",
+  "R-HSA-69242",
+  "R-HSA-69206",
+  "R-HSA-69481",
+  "R-HSA-73884",
+  "R-HSA-191273",
+  "path:hsa00100",
+  "R-HSA-5358508",
+  "path:hsa03430",
+  "R-HSA-5693532",
+  "path:hsa03030",
+  "R-HSA-69002",
+  "R-HSA-69190"
+)
+
+data <- all_enrichment_tcga_personnalized %>%
+  dplyr::filter(pathway_id %in% selected_pathways) 
+
+data$description <- sub(" - Homo sapiens \\(human\\)", "", data$description, ignore.case = T, perl = T)
+data$description <- str_c( data$description, data$pathway_id, sep = " - ")
+data$fdr <- cut(data$fdr, breaks = c(0.0, 0.01, 0.05, 0.1, 0.25, 0.50, 1.00), labels = c("0.01", "0.05", "0.1", "0.25", "0.50", "1.0"))
+
+heatmap_fdr_pathway_tcga <- ggplot(
+  data = data, 
+  aes(x = sample, y = description, fill =  fdr)
+) +
+  geom_tile() +
+  labs(
+    title = "Pathways FDR value by PDCL",
+    x = "Samples",
+    y = "Pathway",
+    fill = "FDR"
+  ) +
+  scale_fill_brewer(
+    palette = "RdBu",
+    na.value = "gray30"
+  ) +
+  #We need to specify this. If not, unpopulated categories do not appear
+  scale_x_discrete(drop = F) +
+  # By default it is sorted in desc order, we reverse it so it is in asc order
+  # scale_y_discrete(limits=rev) +
+  theme(
+    axis.text.x = element_blank(),
+    panel.background = element_rect(fill = "white")
+  )
+
+# ggsave(filename = "~/PhD/paper/analysis-pdcl/manuscript/img/heatmap-fdr-pathway-tcgaepng", plot = heatmap_fdr_pathway_tcga, width = 12, height = 7)
+
+####### Heatmap of the contribution
+
+########### For Kegg pathways
+
+kegg_contrib_matrix <- get.genes.in.pathway(kegg_significant_tcga_personnalized) %>%
+  dplyr::count(pathway_id, gene) %>%
+  dplyr::rename(rank = n) %>%
+  tidyr::complete(pathway_id, gene, fill = list(rank = 0)) %>%
+  tidyr::pivot_wider(names_from = gene, values_from = rank) %>%
+  tibble::column_to_rownames("pathway_id") %>%
+  as.matrix()
+
+mu_contrib_pathways <- rowSums(kegg_contrib_matrix)
+mu_contrib_genes <- colSums(kegg_contrib_matrix)
+kegg_contrib_matrix <- kegg_contrib_matrix[
+  mu_contrib_pathways>quantile(mu_contrib_pathways, probs = 0.75), 
+  mu_contrib_genes>quantile(mu_contrib_genes, probs = 0.75)
+]
+
+kegg_annot_row <- data.frame(pathway_id = row.names(kegg_contrib_matrix)) %>%
+  dplyr::inner_join(kegg_gs_metadata) %>%
+  tibble::column_to_rownames(var = "pathway_id") %>%
+  dplyr::select(category) %>%
+  dplyr::rename(Category = category)
+
+kegg_annot_col <- data.frame(gene = colnames(kegg_contrib_matrix)) %>%
+  dplyr::inner_join(summary_dereg) %>%
+  dplyr::mutate(dereg = case_when(
+    up>0.9 ~ "Frequently Up",
+    down>0.9 ~ "Frequently Down",
+    up+down<0.1 ~ "Frequently Conserved",
+    .default = "None"
+  )) %>%
+  tibble::column_to_rownames(var = "gene") %>%
+  dplyr::select(dereg) %>%
+  dplyr::rename(Deregulation = dereg)
+
+kegg_annot_colors <- list(
+  Deregulation = setNames(c("#E41A1C", "#377EB8", "#4DAC26", "#D9D9D9"), c("Frequently Up", "Frequently Down", "Frequently Conserved", "None")),
+  Category  = setNames(c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00"), unique(kegg_annot_row$Category))
+)
+
+pheatmap::pheatmap(
+  kegg_contrib_matrix,
+  show_rownames = F,
+  show_colnames = F,
+  annotation_row = kegg_annot_row,
+  annotation_col = kegg_annot_col,
+  annotation_colors = kegg_annot_colors,
+  legend = F,
+  main = "TCGA-GBM - Heatmap Gene Contribution to KEGG Pathways",
+  filename = "PhD/Article/analysis-pdcl/manuscript/img/gene_contrib_kegg_tcga.png",
+  width = 14,
+  height = 8
+)
+
+############# For Reactome Pathways
+
+reactome_contrib_matrix <- get.genes.in.pathway(reactome_significant_tcga_personnalized) %>%
+  dplyr::count(pathway_id, gene) %>%
+  dplyr::rename(rank = n) %>%
+  tidyr::complete(pathway_id, gene, fill = list(rank = 0)) %>%
+  tidyr::pivot_wider(names_from = gene, values_from = rank) %>%
+  tibble::column_to_rownames("pathway_id") %>%
+  as.matrix()
+
+mu_contrib_pathways <- rowSums(reactome_contrib_matrix)
+mu_contrib_genes <- colSums(reactome_contrib_matrix)
+reactome_contrib_matrix <- reactome_contrib_matrix[
+  mu_contrib_pathways>quantile(mu_contrib_pathways, probs = 0.9), 
+  mu_contrib_genes>quantile(mu_contrib_genes, probs = 0.75)
+]
+
+reactome_annot_row <- data.frame(pathway_id = row.names(reactome_contrib_matrix)) %>%
+  dplyr::inner_join(reactome_gs_metadata) %>%
+  tibble::column_to_rownames(var = "pathway_id") %>%
+  dplyr::select(category) %>%
+  dplyr::rename(Category = category)
+
+reactome_annot_col <- data.frame(gene = colnames(reactome_contrib_matrix)) %>%
+  dplyr::inner_join(summary_dereg) %>%
+  dplyr::mutate(dereg = case_when(
+    up>0.9 ~ "Frequently Up",
+    down>0.9 ~ "Frequently Down",
+    up+down<0.1 ~ "Frequently Conserved",
+    .default = "None"
+  )) %>%
+  tibble::column_to_rownames(var = "gene") %>%
+  dplyr::select(dereg) %>%
+  dplyr::rename(Deregulation = dereg)
+
+reactome_annot_colors <- list(
+  Deregulation = setNames(c("#E41A1C", "#377EB8", "#4DAC26", "#D9D9D9"), c("Frequently Up", "Frequently Down", "Frequently Conserved", "None")),
+  Category  = setNames(rainbow(n_distinct(reactome_annot_row$Category)), unique(reactome_annot_row$Category))
+)
+
+pheatmap::pheatmap(
+  reactome_contrib_matrix,
+  show_rownames = F,
+  show_colnames = F,
+  annotation_row = reactome_annot_row,
+  annotation_col = reactome_annot_col,
+  annotation_colors = reactome_annot_colors,
+  legend = F,
+  main = "TCGA-GBM - Heatmap Gene Contribution to Reactome Pathways",
+  filename = "PhD/Article/analysis-pdcl/manuscript/img/gene_contrib_reactome_tcga.png",
+  width = 14,
+  height = 8
+)
+
