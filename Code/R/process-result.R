@@ -119,11 +119,12 @@ plot.leading.edge <- function(collapsed.by.method, rnk, nb.max.genes=100){
 
 plot.number.pathways.per.genes <- function(collapsed.by.method, nb.max.genes=100){
   data <- get.genes.in.pathway(collapsed.by.method) %>%
+    dplyr::distinct(pathway_id, description, gene) %>%
     dplyr::count(gene) %>%
     arrange(desc(n)) %>%
     mutate(gene=factor(gene, levels=gene))
   nb_genes <- nrow(data)
-  data <- data %>% slice(1:nb.max.genes)
+  data <- data %>% dplyr::slice(1:nb.max.genes)
   plot_title <- paste0("Top ", nb.max.genes , " genes with the biggest count of enriched pathways")
   plot_subtitle <- paste0("Total number of different genes in pathways leading edge : ", nb_genes)
   plot_count_per_gene <- ggplot(data, aes(gene, n) ) +
