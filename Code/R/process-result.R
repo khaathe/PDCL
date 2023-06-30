@@ -297,3 +297,48 @@ get.penda.final.matrix <- function(penda.result.list, gene.domain = NULL, sort =
   
   dereg_matrix
 }
+
+plot.contrib.genes <- function(
+        data,
+        colvar = "pathway_id",
+        q.pathways = NULL,
+        q.genes = NULL,
+        g.pattern = "\\w*",
+        ...
+){
+    # Create the contribution matrix
+    # We count the number of time a gene is associated to a pathway.
+    # Is is better practice to filter the data to keep only the significant 
+    # results. We can also apply a filter on the gene name to keep only the genes
+    # we wants.
+    contrib_matrix <- get.genes.in.pathway(data) %>%
+        dplyr::filter(stringr::str_detect(gene, g.pattern)) %>%
+        dplyr::count(.data[[colvar]], gene) %>%
+        dplyr::rename(rank = n) %>%
+        tidyr::complete(.data[[colvar]], gene, fill = list(rank = 0)) %>%
+        tidyr::pivot_wider(names_from = gene, values_from = rank) %>%
+        tibble::column_to_rownames(colvar) %>%
+        as.matrix()
+    # Filter the pathways on quantile to reduce the number of pathways displayed
+    # in the heatmap (number of rows)
+    if( !is.null(q.pathways) ){
+        mu_contrib_pathways <- rowSums(contrib_matrix)
+        contrib_matrix <- contrib_matrix[
+            mu_contrib_pathways>quantile(mu_contrib_pathways, probs = q.pathways),
+        ]
+    }
+    # Filter the genes on quantile to reduce the number of genes displayed
+    # in the heatmap (number of columns)
+    if ( !is.null(q.genes) ){
+        mu_contrib_genes <- colSums(contrib_matrix)
+        contrib_matrix <- contrib_matrix[, 
+                                         mu_contrib_genes>quantile(mu_contrib_genes, probs = q.genes)
+        ]
+    }
+    
+    pheatmap::pheatmap(
+        contrib_matrix,
+        ...
+    )
+    
+}
