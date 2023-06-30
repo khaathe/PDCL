@@ -86,7 +86,6 @@ gprofiler_gmt_list <- xfun::cache_rds({
 }, file = "gprofiler_gmt.rds", dir = result_dir, rerun = rerun_rds_cached)
 ```
 
-
 ```{r create-all-res-list}
 all_res <- list()
 ```
@@ -102,7 +101,7 @@ all_res[["G:Profiler"]] <- xfun::cache_rds({
 }, file = "gprofiler_result", dir = result_dir, rerun = rerun_rds_cached)
 ```
 
-```{r convert-to-enrichment} 
+```{r convert-to-enrichment}
 all_enrichment <- list()
 all_enrichment[["G:Profiler"]] <- map_depth(all_res[["G:Profiler"]], .depth = 1, .f = convert.gost.to.enrichment)
 ```
@@ -138,7 +137,7 @@ reactome_significant <- all_enrich_collapsed %>%
 
 # Category Enriched {data-navmenu="Kegg"}
 
-## {.tabset}
+##  {.tabset}
 
 ### Heatmap Categories
 
@@ -186,7 +185,7 @@ barplot_kegg_categories
 
 # Enrichment Per Samples {data-navmenu="Kegg"}
 
-## {.tabset}
+##  {.tabset}
 
 ### Heatmap FDR Metabolism and Cellular Processes
 
@@ -216,7 +215,7 @@ freq_dereg_kegg <- kegg_significant %>%
 datatable(freq_dereg_kegg)
 ```
 
-# Clustering {data-navmenu="Kegg" data-orientation=columns}
+# Clustering {data-navmenu="Kegg" data-orientation="columns"}
 
 ```{r count-tot-for-cluster}
 gmt <- lapply(gmt_path, read.gmt)
@@ -227,7 +226,6 @@ list_tot_count <- purrr::imap(gmt, function(x,y){
     dplyr::mutate(category = factor(category))
 })
 ```
-
 
 ```{r cluster-kegg}
 table_kegg_category <- kegg_significant %>% 
@@ -246,7 +244,7 @@ mclust_kegg <- mclust::Mclust(clustering_vector_kegg)
 pca_kegg <- prcomp(clustering_vector_kegg, scale = T)
 ```
 
-## {.tabset}
+##  {.tabset}
 
 ### Cluster Plot K-Means KEGG
 
@@ -268,7 +266,7 @@ cluster_plot_mclust_kegg <- fviz_cluster(mclust_kegg, clustering_vector_kegg, re
 cluster_plot_mclust_kegg
 ```
 
-##
+## 
 
 ### Var Correlation
 
@@ -277,10 +275,9 @@ corr_circle_plot_kegg <- fviz_pca_var(pca_kegg, axes = c(1,2), repel = T)
 corr_circle_plot_kegg
 ```
 
-
 # Category Enriched {data-navmenu="Reactome"}
 
-## {.tabset}
+##  {.tabset}
 
 ### Heatmap Categories
 
@@ -328,7 +325,7 @@ barplot_reactome_categories
 
 # Enrichment Per Sample {data-navmenu="Reactome"}
 
-## {.tabset}
+##  {.tabset}
 
 ### Heatmap FDR Metabolism and ECM
 
@@ -358,7 +355,7 @@ freq_dereg_reactome <- reactome_significant %>%
 datatable(freq_dereg_reactome)
 ```
 
-# Clustering {data-navmenu="Reactome" data-orientation=columns}
+# Clustering {data-navmenu="Reactome" data-orientation="columns"}
 
 ```{r cluster-reactome}
 table_reactome_category <- reactome_significant %>% 
@@ -377,13 +374,13 @@ mclust_reactome<- mclust::Mclust(clustering_vector_reactome)
 pca_reactome <- prcomp(clustering_vector_reactome, scale = T)
 ```
 
-## {.tabset}
+##  {.tabset}
 
 ### Cluster Plot K-Means reactome
 
 ```{r cluster-plot-kmeans-reactome, fig.width=12, fig.height=7}
 cluster_plot_kmeans_reactome <- fviz_cluster(kmeans_reactome, clustering_vector_reactome, repel = TRUE) + 
-  labs(title = "Cluster Plot K-Means reactome (5 centers)") +
+  labs(title = "Cluster Plot K-Means reactome (3 centers)") +
   geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
   geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
 cluster_plot_kmeans_reactome
@@ -399,7 +396,7 @@ cluster_plot_mclust_reactome <- fviz_cluster(mclust_reactome, clustering_vector_
 cluster_plot_mclust_reactome
 ```
 
-##
+## 
 
 ### Var Correlation
 
@@ -436,7 +433,6 @@ count_enriched_method
 plot_contrig_pca_kegg <- fviz_contrib(pca_kegg, choice = "var")
 plot_contrig_pca_kegg
 ```
-
 
 ```{r save-session}
 save.image("2_tcga_enrichment_personnalized.RData")
