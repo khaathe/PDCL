@@ -38,8 +38,10 @@ Define GMT path
 
 ```{r define-gmt-path, echo = TRUE}
 gmt_path <- list(
-  reactome = "../Data/gene-set/reactome_no_less_15_no_more_500_categ_filtered.gmt",
-  kegg = "../Data/gene-set/kegg_no_less_15_no_more_500_categ_filtered.gmt"
+  reactome = "../Data/gene-set/reactome_no_less_15_no_more_500.gmt",
+  kegg = "../Data/gene-set/kegg_no_less_15_no_more_500.gmt",
+  reactome_categ_filtered = "../Data/gene-set/reactome_no_less_15_no_more_500_categ_filtered.gmt",
+  kegg_categ_filtered = "../Data/gene-set/kegg_no_less_15_no_more_500_categ_filtered.gmt"
 )
 ```
 
