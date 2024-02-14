@@ -87,19 +87,24 @@ get.genes.in.pathway <- function(collapsed.by.method){
 
 # Plot the genes present in the leadingEdge of enriched pathways coloured
 # by the rank submitted.
-plot.leading.edge <- function(collapsed.by.method, rnk, nb.max.genes=100){
+plot.leading.edge <- function(collapsed.by.method, rnk, nb.max.genes=100, keep_genes=NULL){
   data <- get.genes.in.pathway(collapsed.by.method) %>%
     dplyr::mutate(rank = rnk[gene])
   
   nb_total_genes <- n_distinct(data$gene)
   nb_pathways <- n_distinct(data$description)
-  keep <- data %>% 
-    distinct(gene, rank) %>% 
-    arrange(desc(abs(rank))) %>% 
-    slice(1:nb.max.genes) %>% 
-    pull(gene)
-  data <- filter(data, gene %in% keep) %>%
-    mutate(gene = factor(gene, levels = keep))
+  if(is.null(keep_genes)){
+      keep <- data %>% 
+          distinct(gene, rank) %>% 
+          arrange(desc(abs(rank))) %>% 
+          slice(1:nb.max.genes) %>% 
+          pull(gene)
+      data <- filter(data, gene %in% keep) %>%
+          mutate(gene = factor(gene, levels = keep))
+  } else {
+      data <- filter(data, gene %in% keep_genes) %>%
+          mutate(gene = factor(gene, levels = keep_genes))
+  }
   
   plot_title <- paste0("Top ", nb.max.genes , " genes in the ", nb_pathways ," most enriched pathways")
   plot_subtitle <- paste0("Total number of different genes in pathways leading edge : ", nb_total_genes)
