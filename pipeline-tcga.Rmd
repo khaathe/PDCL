@@ -1,0 +1,280 @@
+---
+title: "Reproducible Pipeline for Differential Expression and Pathway Enrichment Analysis"
+subtitle: ""
+author: "Kévin Spinicci, Jorge Bretones Santamarina, Clémentine Decamps, Maïte Verreault, Ahmed Idbaih, Magali Richard, Annabelle Ballesta, Gibin Powathil, Angélique Stéphanou"
+contact: 
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+# Load required libraries
+library(Biobase)
+library(dplyr)
+library(purrr)
+library(plotly)
+library(DT)
+library(mclust)
+library(factoextra)
+library(penda)
+library(DESeq2)
+library(BiocParallel)
+library(dplyr)
+
+# Set up multi-core threading
+multicoreParam <- BiocParallel::MulticoreParam(workers = 4)
+register(multicoreParam)
+
+tcga_count_path <- "Data/tcga-dataset/TCGA-GBM-v32.0/count_matrix.txt"
+tcga_metadata_path <- "Data/tcga-dataset/TCGA-GBM-v32.0/gdc_sample_sheet.2022-07-18.tsv"
+
+# Initialize parameters
+validation_datasets_param <- list(
+  nb_validation_run = 5,
+  nb_validation_ctrl = 2
+)
+penda_params <- list(
+    datasets = list(
+      detectlowvalue = T, 
+      detectNA = T, 
+      threshold = 0.99,
+      val_min = NA,
+      bimod = F
+    ),
+    list = list(
+      threshold = 0.99, 
+      s_max = 60
+    ),
+    test = list(
+      threshold_test = 0.8,
+      iterations = 60,
+      quant_test = 0.0,
+      factor_test = 1.1
+    )    
+)
+rerun_cache <- F
+result_dir = "Result/pipeline-tcga/"
+```
+
+# Introduction
+
+This document aims to provide a reproducible analysis following the workflow described in the article `Exploration of the altered mechanisms of the tumour cell using Differential Expression and Pathway Enrichment analysis: Application to glioblastoma`.
+Only data from TCGA will be used in this document as data from PDCLs are not available.
+
+# Dataset and Data Filtering
+
+## Prepare Count-Data
+
+This datasets consist of 168 tumour samples with 5 controls. Here we load the count data
+and count metadata stored in tabular format. We add the `condition` variable for
+DESeq2 analysis.
+
+```{r prepare-count-data, eval = T, include=T}
+count_data <- read.table(tcga_count_path, sep = "\t", header = T, check.names = F)
+count_data <- count_data[isUnique(count_data$gene_name),]
+row.names(count_data) <- count_data$gene_name
+count_data <- count_data[, !(colnames(count_data) %in% c("gene_name", "gene_id"))]
+# Create Metadata
+count_metadata <- read.table(tcga_metadata_path, sep = "\t", header = T)
+count_metadata$condition <- "tumour"
+# Find controls
+control_index <- which(count_metadata$Sample.Type == "Solid Tissue Normal")
+control_names <- colnames(count_data)[control_index]
+count_metadata$condition[control_index] <- "control"
+```
+
+**Note:** This document is an example of the workflow and is designed for a fast
+execution. Thus the number of samples and genes tested is limited. Yet for a
+complete analysis, users should use the complete set of data.
+
+```{r select-samples}
+
+```
+
+## Pseudo-log Normalization
+
+```{r make-data}
+dds <- DESeqDataSetFromMatrix(
+  countData = count_data, 
+  colData = count_metadata, 
+  design = ~condition
+)
+dds <- DESeq(dds)
+pld <- normTransform(dds)
+normalized_count <- assay(pld, blind = F)
+all_data <- as.matrix(normalized_count)
+```
+
+## Sample Validation
+
+PCA visualization to compare controls and tumour samples to ensure that they can be classified in 2 groups
+and that controls are not too different from each others.
+
+```{r pca-visualization, echo=FALSE}
+t_data <- t(all_data)
+t_data <- t_data[, colSds(t_data) != 0]
+pca_obj <- prcomp(t_data, scale. = T)
+pca_plot <- fviz_pca_ind(pca_obj, col.ind = count_metadata$condition, geom = "point")
+pca_plot
+```
+
+Density of the normalized counts using the Pseudo-Log transformation from DESeq2 to compare the distribution
+of counts.
+
+```{r density-visualization, echo=FALSE}
+all_density <- purrr::map_dfr(1:ncol(all_data), function(i){
+  density_obj <- density(all_data[,i]) 
+  data.frame(count = density_obj$x, density = density_obj$y, sample_index = i)
+})
+all_density$sample_type <- count_metadata$sample_type[all_density$sample_index]
+all_density$condition <- count_metadata$condition[all_density$sample_index]
+density_plot <- ggplot(all_density, aes(count, density, group = sample_index, colour = condition)) +
+  geom_line(show.legend = F) +
+  facet_wrap(~condition, ncol = 1) +
+  labs(title = "Density plot of the log(count+1)")
+density_plot
+```
+
+## Data filtering
+
+Here we prepare several PenDA datasets to perform crossed-validation.
+We don't have enough controls so we use this approach to ensure the quality of the Differential Expression analysis.
+
+```{r make-penda-datasets}
+set.seed(1)
+# sample n times a vector of size k in the control (see validation_datasets_param)
+validation_ctrl <- lapply(1:validation_datasets_param$nb_validation_run, function(i){
+  sample(control_names, validation_datasets_param$nb_validation_ctrl)
+})
+
+all_penda_datasets <- xfun::cache_rds({
+  with(penda_params$datasets, {
+    BiocParallel::bplapply(1:validation_datasets_param$nb_validation_run, function(i){
+      validation_ctrl_set <- validation_ctrl[[i]]
+      names_ctrl_set <- control_names[!(control_names %in% validation_ctrl_set)]
+      index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
+      cases <- all_data[,-index_ctrl_set]
+      ctrl <- all_data[,index_ctrl_set]
+      penda::make_dataset(ctrl, cases, detectlowvalue = detectlowvalue, detectNA = detectNA, threshold = threshold, val_min = val_min, bimod = bimod)
+    })
+  })
+}, rerun = rerun_cache, file = "all_penda_datasets.rds", dir = result_dir)
+```
+
+## Relative gene ordering
+
+```{r compute-L-H-lists}
+all_L_H_list <- with(penda_params$list, {
+  BiocParallel::bplapply(all_penda_datasets, function(penda_dataset){
+    penda::compute_lower_and_higher_lists(penda_dataset$data_ctrl, threshold = threshold, s_max = s_max)
+  })
+})
+```
+
+
+# Differential Expression Analysis
+
+# Differential Expression testing
+
+We hide the results of this chunck because it will overload the doc with unnecessary comments.
+
+```{r run-penda, message=FALSE}
+all_penda_res <- xfun::cache_rds({
+  with(penda_params$test, {
+    BiocParallel::bplapply(1:length(all_penda_datasets), function(i){
+      penda_dataset <- all_penda_datasets[[i]]
+      L_H_list <- all_L_H_list[[i]]
+      penda::penda_test(
+        samples = penda_dataset$data_case, 
+        controls = penda_dataset$data_ctrl, 
+        threshold = threshold_test, 
+        iterations = iterations,
+        L_H_list = L_H_list,
+        quant_test = quant_test,
+        factor_test = factor_test
+      )
+    })
+  })
+}, rerun = rerun_cache, file = "all_penda_res.rds", dir = result_dir)
+```
+
+## Common Deregulations
+
+```{r common-dereg-percentage, echo = FALSE, fig.width=12, fig.height=8}
+all_penda_res <- penda.res.sort(all_penda_res, keep.sample = c(-1,-2), gene.domain = row.names(count_data) )
+
+results_combination <- combn(1:length(all_penda_res), 2, simplify = F)
+common_dereg_percentage <- purrr::imap_dfr(results_combination, function(combination, i){
+  index_res1 <- combination[1]
+  index_res2 <- combination[2]
+  res1 <- all_penda_res[[index_res1]]
+  res2 <- all_penda_res[[index_res2]]
+  down_commons <- sum(res1$down == res2$down)/length(res1$down)
+  up_commons <- sum(res1$up == res2$up)/length(res1$up)
+  data.frame(down=down_commons, up = up_commons, combination_numb = i)
+})
+
+data <- common_dereg_percentage %>%
+  tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
+  dplyr::mutate(run = as.factor(combination_numb))
+
+plot_common_dereg_percent <- ggplot(data, aes(x = run, y = percent, colour = dereg)) +
+  geom_point() +
+  geom_hline(yintercept = 0.97, colour = "red", alpha = 0.6) 
+
+plot_common_dereg_percent
+
+dereg_matrix <- get.penda.final.matrix(all_penda_res, sort = F, gene.domain = row.names(count_data) )
+```
+
+```{r dereg-perecent}
+dereg_percentage <- purrr::imap_dfr(all_penda_res, function(penda_res, run){
+  up <- colSums(penda_res$up_genes)/nrow(penda_res$up_genes)
+  down <- colSums(penda_res$down_genes)/nrow(penda_res$down_genes)
+  total <- up + down
+  data.frame(sample = names(up), up = up, down = down, total = total, run = run, row.names = NULL)
+})
+```
+
+## Deregulation Tumour Percent
+
+```{r tumour-dereg-perecent, echo = FALSE}
+data <- dereg_percentage %>%
+  tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
+  dplyr::filter(!(sample %in% control_names)) %>%
+  dplyr::mutate(run = as.factor(run))
+
+plot_dereg_percent_tumour <- ggplot(data, aes(x = run, y = percent, colour = dereg)) +
+  geom_point() +
+  geom_hline(yintercept = c(0.05, 0.1, 0.3, 0.5), colour = "grey", linetype = "dashed") +
+  ylim(c(0,1))
+
+plot_dereg_percent_tumour
+```
+
+## Deregulation Controls Percentage
+
+```{r controls-dereg-perecent, echo = FALSE}
+data <- dereg_percentage %>%
+  tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
+  dplyr::filter(sample %in% control_names) %>%
+  dplyr::mutate(run = as.factor(run))
+
+plot_dereg_percent_control <- ggplot(data, aes(x = run, y = percent, colour = dereg)) +
+  geom_point() +
+  geom_hline(yintercept = c(0.05, 0.1), colour = c("red", "blue"), linetype = "dotted") +
+  ylim(c(0,1))
+
+plot_dereg_percent_control
+```
+
+# Session Information
+
+```{r session-info}
+sessionInfo()
+```
