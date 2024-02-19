@@ -25,46 +25,90 @@ library(penda)
 library(DESeq2)
 library(BiocParallel)
 library(dplyr)
-
+library(tidyr)
+library(fgsea)
+library(gprofiler2)
+library(knitr)
 # Set up multi-core threading
 multicoreParam <- BiocParallel::MulticoreParam(workers = 4)
 register(multicoreParam)
 
 tcga_count_path <- "Data/tcga-dataset/TCGA-GBM-v32.0/count_matrix.txt"
 tcga_metadata_path <- "Data/tcga-dataset/TCGA-GBM-v32.0/gdc_sample_sheet.2022-07-18.tsv"
+reactome_gmt_path <- "Data/gene-set/reactome_no_less_15_no_more_500.gmt"
+reactome_gs_md_path <- "Data/gene-set/reactome_geneset_metadata.csv"
+result_dir <- "Result/pipeline-tcga/"
+```
 
-# Initialize parameters
-validation_datasets_param <- list(
-  nb_validation_run = 5,
-  nb_validation_ctrl = 2
+```{r functions, include=FALSE}
+# GGPlot Theming
+base_theme <- theme(
+    strip.background = element_rect(fill = "white", colour = "black"),
+    panel.background = element_rect(fill = "white"),
+    panel.ontop = F
 )
-penda_params <- list(
-    datasets = list(
-      detectlowvalue = T, 
-      detectNA = T, 
-      threshold = 0.99,
-      val_min = NA,
-      bimod = F
-    ),
-    list = list(
-      threshold = 0.99, 
-      s_max = 60
-    ),
-    test = list(
-      threshold_test = 0.8,
-      iterations = 60,
-      quant_test = 0.0,
-      factor_test = 1.1
-    )    
+
+scatter_theme <- base_theme + theme(
+    panel.grid.major = element_line(colour = "grey50", linetype = "solid", linewidth = 0.1),
 )
-rerun_cache <- F
-result_dir = "Result/pipeline-tcga/"
+
+bar_theme <- base_theme + theme(
+    panel.grid.major.y = element_line(colour = "grey50", linetype = "solid", linewidth = 0.1)
+)
+
+fdr.breaks <- c(0.0, 0.01, 0.025, 0.04, 0.05, 0.1, 0.25, 0.50, 0.75, 1.00) # cut-off for FDR bins
+fdr.labels <- c("0.01", "0.025", "0.04", "0.05", "0.1", "0.25", "0.50", "0.75", "1.0") # Lables for FDR bins
+heatmap_pathways <- function(data){
+    df <- data %>%
+        dplyr::mutate(
+            fdr = cut(fdr, breaks = fdr.breaks, labels = fdr.labels)
+        )
+    m <- df %>%
+        dplyr::mutate(
+            fdr = fdr.breaks[as.numeric(fdr)+1] # Add +1 to avoid 0 in fdr.breaks
+        ) %>%
+        dplyr::select(description, sample, fdr) %>%
+        tidyr::pivot_wider(names_from = "sample", values_from = "fdr") %>%
+        tibble::column_to_rownames("description") %>%
+        as.matrix()
+    
+    row_clust <- hclust(dist(m))
+    roworder <- row_clust$labels[row_clust$order]
+    col_clust <- hclust(dist(t(m)))
+    colorder <- col_clust$labels[col_clust$order]
+    df$description <- factor(df$description, levels = roworder)
+    df$sample <- factor(df$sample, levels = colorder)
+    ggplot(
+        data = df,
+        aes(x = sample, y = description, fill =  fdr)
+    ) +
+        geom_tile() +
+        labs(
+            x = "Samples",
+            y = "Pathway",
+            fill = "FDR"
+        ) +
+        scale_fill_brewer(
+            palette = "RdBu",
+            na.value = "gray30"
+        ) +
+        base_theme
+}
 ```
 
 # Introduction
 
-This document aims to provide a reproducible analysis following the workflow described in the article `Exploration of the altered mechanisms of the tumour cell using Differential Expression and Pathway Enrichment analysis: Application to glioblastoma`.
+This document aims to provide a reproducible analysis following the workflow 
+described in the article `Exploration of the altered mechanisms of the tumour`
+`cell using Differential Expression and Pathway Enrichment analysis: Application to glioblastoma`.
 Only data from TCGA will be used in this document as data from PDCLs are not available.
+The parameters of the different functions used for Differential Expression testing
+and pathways enrichment won't be described in this document. Links to the relevant
+documentations are available.
+
+
+**Note:** Here we use the function `xfun::cache_rds` to cache operation can be
+quite long. Cached results can be accessed in the `r result_dir` directory.
 
 # Dataset and Data Filtering
 
@@ -75,17 +119,16 @@ and count metadata stored in tabular format. We add the `condition` variable for
 DESeq2 analysis.
 
 ```{r prepare-count-data, eval = T, include=T}
-count_data <- read.table(tcga_count_path, sep = "\t", header = T, check.names = F)
-count_data <- count_data[isUnique(count_data$gene_name),]
-row.names(count_data) <- count_data$gene_name
-count_data <- count_data[, !(colnames(count_data) %in% c("gene_name", "gene_id"))]
+count_data <- read.table(tcga_count_path, sep = "\t", header = T, check.names = F) %>%
+    dplyr::filter(isUnique(gene_name)) %>%
+    tibble::column_to_rownames("gene_name") %>%
+    dplyr::select(!dplyr::starts_with("gene_"))
 # Create Metadata
-count_metadata <- read.table(tcga_metadata_path, sep = "\t", header = T)
-count_metadata$condition <- "tumour"
-# Find controls
-control_index <- which(count_metadata$Sample.Type == "Solid Tissue Normal")
-control_names <- colnames(count_data)[control_index]
-count_metadata$condition[control_index] <- "control"
+count_metadata <- read.table(tcga_metadata_path, sep = "\t", header = T) %>%
+    dplyr::mutate(
+        condition = dplyr::if_else(Sample.Type == "Solid Tissue Normal", "control", "tumour")
+    ) %>%
+    dplyr::arrange(condition)
 ```
 
 **Note:** This document is an example of the workflow and is designed for a fast
@@ -93,10 +136,16 @@ execution. Thus the number of samples and genes tested is limited. Yet for a
 complete analysis, users should use the complete set of data.
 
 ```{r select-samples}
-
+count_metadata <- count_metadata[1:20,]
+count_data <- count_data[, count_metadata$File.ID]
+count_data <- count_data[sample(1:59317, 30000),]
+dim(count_data)
 ```
 
 ## Pseudo-log Normalization
+
+Here we use the pseudo-log normalisation from the `DESeq2` package.
+The normalized count will be used for PCA visualisation prior to any analyses and for the `PenDA` differential testing.
 
 ```{r make-data}
 dds <- DESeqDataSetFromMatrix(
@@ -105,172 +154,426 @@ dds <- DESeqDataSetFromMatrix(
   design = ~condition
 )
 dds <- DESeq(dds)
-pld <- normTransform(dds)
-normalized_count <- assay(pld, blind = F)
-all_data <- as.matrix(normalized_count)
+count_normalized <- normTransform(dds)
+count_normalized <- assay(count_normalized, blind = F)
 ```
 
-## Sample Validation
-
-PCA visualization to compare controls and tumour samples to ensure that they can be classified in 2 groups
-and that controls are not too different from each others.
+Here we use a Principal Component Analysis (PCA) to visualize the samples in 2D.
+This allows to assess how well the controls separate from the tumours and how
+similar the different tumour samples are.
+PCA plot is usefull to have a first idea of the data before doing any Differential
+Expression analysis.
 
 ```{r pca-visualization, echo=FALSE}
-t_data <- t(all_data)
+t_data <- t(count_normalized)
 t_data <- t_data[, colSds(t_data) != 0]
 pca_obj <- prcomp(t_data, scale. = T)
 pca_plot <- fviz_pca_ind(pca_obj, col.ind = count_metadata$condition, geom = "point")
 pca_plot
 ```
 
-Density of the normalized counts using the Pseudo-Log transformation from DESeq2 to compare the distribution
-of counts.
+# Analysis at the population level
 
-```{r density-visualization, echo=FALSE}
-all_density <- purrr::map_dfr(1:ncol(all_data), function(i){
-  density_obj <- density(all_data[,i]) 
-  data.frame(count = density_obj$x, density = density_obj$y, sample_index = i)
-})
-all_density$sample_type <- count_metadata$sample_type[all_density$sample_index]
-all_density$condition <- count_metadata$condition[all_density$sample_index]
-density_plot <- ggplot(all_density, aes(count, density, group = sample_index, colour = condition)) +
-  geom_line(show.legend = F) +
-  facet_wrap(~condition, ncol = 1) +
-  labs(title = "Density plot of the log(count+1)")
-density_plot
+In this part we will perform differential expression analysis at the population level, as
+described in our paper. 
+
+## Differential Expression analysis with DESeq2
+
+Here we use [DESeq2](https://doi.org/doi:10.18129/B9.bioc.DESeq2), 
+a famous tools with good performance designed for Differential expression analysis.
+See [doi:10.1186/s13059-014-0550-8](https://doi.org/10.1186/s13059-014-0550-8) for
+more information about the DEseq2 algorithm.
+
+```{r deseq2-test}
+deseq2_res <- results(dds, alpha = 0.05, contrast = c("condition", "tumour", "control"))
+summary(deseq2_res)
 ```
 
-## Data filtering
 
-Here we prepare several PenDA datasets to perform crossed-validation.
-We don't have enough controls so we use this approach to ensure the quality of the Differential Expression analysis.
+```{r volcano-plot-deseq2, echo=FALSE}
+data <- as.data.frame(deseq2_res)
+ggplot(data, aes(x = log2FoldChange, y = -log10(padj), colour = (padj<0.05) ) ) +
+    geom_point() +
+    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "grey"), labels = c("Deregulated", "Not Deregulated")) +
+    labs(
+        title = "Volcano Plot DESeq2 Results",
+        colour = NULL
+    )
+```
+
+## Pathway Enrichment with GSEA and G:Profiler
+
+Here we run a Gene Set Enrichment Analysis (GSEA) using the `fgsea` R package
+(see [https://doi.org/doi:10.18129/B9.bioc.fgsea](https://doi.org/doi:10.18129/B9.bioc.fgsea)).
+
+```{r run-gsea-population}
+rnk <- as.data.frame(deseq2_res) %>%
+    tidyr::drop_na() %>%
+    arrange(desc(stat)) %>%
+    tibble::rownames_to_column("gene") %>%
+    pull(stat, name = "gene")
+set.seed(1)
+gsea_gmt <- gmtPathways(reactome_gmt_path)
+# Here we read the gmt file to store the pathway ID and the description
+# of each pathway so we can add the description to the fGSEA results as
+# fGSEA does not retain that information.
+gmt_desc <- strsplit(readLines(con = reactome_gmt_path), "\t", perl=T) %>%
+    purrr::map(.f = function(l){
+        data.frame(id = l[1], description = l[2])
+    }) %>%
+    purrr::list_rbind() %>%
+    dplyr::pull(description, name = id)
+gsea_res <- xfun::cache_rds({
+    fgsea(gsea_gmt, rnk, minSize=15, maxSize=500, nperm = 1000, nproc = 4) %>%
+    dplyr::arrange(padj) %>%
+    dplyr::mutate(description = gmt_desc[pathway])
+}, file = "gseares_population.rds", dir = result_dir)
+kable(head(gsea_res, n = 15))
+```
+
+The GSEA compute an Enrichment Score (ES) and a Normalized Enrichment Score (NES)
+for each pathways. The NES is then compared to the score of a null-distribution
+to test for enrichment. Here we plot the score of the most significant pathways.
+
+```{r plot-nes-reactome, echo = FALSE, fig.width=12, fig.height=7}
+data <- gsea_res %>%
+    dplyr::mutate(nes_factor = dplyr::if_else(NES < 0, -1, 1)) %>%
+    dplyr::group_by(nes_factor) %>%
+    dplyr::arrange(padj) %>%
+    dplyr::slice_head(n = 10) %>%
+    dplyr::mutate(description = reorder(description, NES))
+ggplot(data, aes(NES, description, fill = padj) ) +
+    geom_col() +
+    scale_fill_gradient(low = "#56B1F7", high = "#132B43") +
+    labs(
+      title = "NES Score of GSEA",
+      x = "NES",
+      y = "Pathways"
+    )
+```
+
+Here we run the G:Profiler anaylsis using the `gprofiler2` R package provided by
+the team developping G:Profiler (see the [G:Profiler vignette](https://cran.r-project.org/web/packages/gprofiler2/vignettes/gprofiler2.html) ).
+
+```{r run-gprofiler-population}
+gprofiler_background <- row.names(deseq2_res)
+gprofiler_list <- as.data.frame(deseq2_res) %>%
+    tibble::rownames_to_column("gene") %>%
+    dplyr::filter(padj <= 0.05) %>%
+    dplyr::pull(gene)
+gost_res <- xfun::cache_rds({
+    gprofiler_gmt <- upload_GMT_file(reactome_gmt_path)
+    gost(
+        query = gprofiler_list,
+        organism = gprofiler_gmt,
+        user_threshold = 0.05,
+        significant = F,
+        correction_method = "fdr",
+        evcodes = F,
+        custom_bg = gprofiler_background
+    )
+}, file = "gostres_population.rds", dir = result_dir)
+```
+
+**Note:** The paramater `evcodes` return the name of the genes included in the
+result of a pathway. Yet this greatly affect the performance of G:Profiler thus
+it is set to `FALSE` in both the population and individual analysis.
+
+The `gprofiler` R package also offer built-in plot to investigate the results of
+a G:Profiler analysis.
+
+```{r plot-gostres, echo=FALSE}
+gostplot(gost_res)
+```
+
+## Investigation of deregulated pathways
+
+In this section, we show an example of plots to investigate the the deregulated pathways.
+These are similar to those presented in the main paper.
+
+First we convert the results from `fGSEA` and `G:Profiler` to a more format closer
+to the Generic Enrichment Map (GEM) format.
+
+```{r population-enrichment}
+gsea_enrichment <- gsea_res %>%
+    dplyr::rename(pathway_id = pathway, p_value= pval, fdr=padj) %>%
+    dplyr::mutate(
+        phenotype = sign(ES),
+        method = "gsea",
+        genes = sapply(leadingEdge, function(e){ paste0(e, collapse = ",")} )
+    ) %>%
+    dplyr::select(pathway_id, description, p_value, fdr, phenotype, genes, method) %>%
+    tidyr::drop_na()
+gprofiler_enrichment <- gost_res$result %>%
+    dplyr::rename(pathway_id = term_id, description = term_name) %>%
+    dplyr::mutate(
+        fdr = p_value,
+        phenotype = 1,
+        method = "gprofiler",
+        genes = ifelse(hasName(gost_res$result, "intersection"), intersection, NA)
+    ) %>%
+    dplyr::select(pathway_id,description, p_value, fdr, phenotype, genes, method)
+population_enrichment <- rbind(gsea_enrichment, gprofiler_enrichment)
+```
+
+Here we plot the different Reactome categories with for each category the number of
+pathways specific to GSEA, G:Profiler or common to both tools.
+
+```{r barplot-category-population, echo = FALSE}
+common_pathway <- population_enrichment %>%
+    tidyr::pivot_wider(names_from = "method", values_from = c("p_value", "fdr", "phenotype", "genes")) %>%
+    dplyr::mutate(
+        common = dplyr::case_when(
+            (fdr_gsea < 0.05) & (fdr_gprofiler < 0.05) ~ "Common",
+            fdr_gprofiler < 0.05 ~ "G:Profiler",
+            fdr_gsea < 0.05 ~ "GSEA"
+        )
+    )
+reactome_gs_metadata <- read.csv(reactome_gs_md_path, as.is = T)
+all_enrichment_global <- population_enrichment %>%
+    dplyr::inner_join(common_pathway) %>%
+    dplyr::select(pathway_id, description, p_value, fdr, phenotype, genes, method, common) %>%
+    dplyr::inner_join(reactome_gs_metadata)
+
+data <- all_enrichment_global %>%
+    dplyr::filter(fdr<0.05) %>%
+    dplyr::mutate(category = factor(category, levels = sort(unique(reactome_gs_metadata$category))))
+ggplot(data, aes(category, fill = common)) +
+    geom_bar(position = "dodge2") + 
+    theme(axis.text.x = element_text(angle = 90) ) +
+    labs(
+        title = "Enriched Reactome Categories",
+        x = "Biological Categories",
+        y = "Count Pathways",
+        fill = "Method"
+    ) +
+    scale_x_discrete(drop = F) +
+    bar_theme +
+    theme(
+        panel.grid.major = element_line(colour = "grey50", linetype = "solid", linewidth = 0.1)
+    )
+```
+
+Here we plot the `-log10(fdr)` for the top most significant pathways at the population
+level in both GSEA and G:Profiler.
+
+```{r heatmap-population, echo=FALSE, fig.width=9, fig.height=8}
+top_pathways <- all_enrichment_global %>%
+    dplyr::group_by(method) %>%
+    dplyr::arrange(fdr) %>%
+    dplyr::slice_head(n = 10) %>%
+    dplyr::pull(pathway_id)
+data <- all_enrichment_global %>%
+    dplyr::filter(pathway_id %in% top_pathways) %>%
+    dplyr::mutate(
+        method = factor(method, levels = c("gsea", "gprofiler"), labels = c("GSEA", "G:Profiler")),
+        description = stringr::str_wrap(description, width=40)
+    )
+ggplot(data, aes(x = method, y = description, fill = -log10(fdr))) +
+    geom_tile() +
+    scale_y_discrete(limits = rev) +
+    labs(
+        title = "Heatmap FDR of selected pathways for analysis at Population scale",
+        x = "Pathway Enrichment Tool",
+        y = "Pathways",
+        fill = "-log10(FDR)"
+    ) +
+    scale_fill_distiller(
+        palette = "RdBu"
+    ) +
+    scatter_theme +
+    theme(axis.text.x = element_text(angle = 90) )
+```
+
+# Analysis at the individual level
+
+In this section we perform the analysis at the individual level with PenDA
+followed by a G:Profiler analysis. 
+
+## Differential expression analysis with PenDA
+
+A typical analysis in PenDA follows these three steps:
+1. Creation of a PenDA dataset with filtering of the data.
+2. Relative gene ordering and creation of Higher/Lower lists.
+3. Differential Expression testing
+
+Here we create the PenDA datasets and filter the data. Gene with low counts
+are removed from the datasets during these process. Detection of low counts
+uses a bimodale distribution, this behavior is controlled by the `bimod` parameter.
+In our case, we do not use a bimodale distribution.
 
 ```{r make-penda-datasets}
-set.seed(1)
-# sample n times a vector of size k in the control (see validation_datasets_param)
-validation_ctrl <- lapply(1:validation_datasets_param$nb_validation_run, function(i){
-  sample(control_names, validation_datasets_param$nb_validation_ctrl)
-})
-
-all_penda_datasets <- xfun::cache_rds({
-  with(penda_params$datasets, {
-    BiocParallel::bplapply(1:validation_datasets_param$nb_validation_run, function(i){
-      validation_ctrl_set <- validation_ctrl[[i]]
-      names_ctrl_set <- control_names[!(control_names %in% validation_ctrl_set)]
-      index_ctrl_set <- which(colnames(all_data) %in% names_ctrl_set)
-      cases <- all_data[,-index_ctrl_set]
-      ctrl <- all_data[,index_ctrl_set]
-      penda::make_dataset(ctrl, cases, detectlowvalue = detectlowvalue, detectNA = detectNA, threshold = threshold, val_min = val_min, bimod = bimod)
-    })
-  })
-}, rerun = rerun_cache, file = "all_penda_datasets.rds", dir = result_dir)
+ctrl <- count_normalized[,count_metadata$File.ID[1:5]] # Keep only controls
+cases <- count_normalized[,count_metadata$File.ID[6:20]] # Keep only tumours
+penda_dataset <- penda::make_dataset(
+  ctrl,
+  cases,
+  detectlowvalue = T,
+  detectNA = T,
+  threshold = 0.99,
+  val_min = NA,
+  bimod = F
+)
 ```
 
-## Relative gene ordering
+Then we compute the Lower and Higher list for each genes in the dataset.
+These lists are necessary for PenDA differential testing. The lower and higher 
+lists represents the gene whose expression is higher or lower than the current
+gene in at least `threshold` percentage of controls. We can control the size of
+each list (`s_max` parameter).
 
 ```{r compute-L-H-lists}
-all_L_H_list <- with(penda_params$list, {
-  BiocParallel::bplapply(all_penda_datasets, function(penda_dataset){
-    penda::compute_lower_and_higher_lists(penda_dataset$data_ctrl, threshold = threshold, s_max = s_max)
-  })
-})
+L_H_list <- penda::compute_lower_and_higher_lists(
+  penda_dataset$data_ctrl,
+  threshold = 0.99,
+  s_max = 60
+)
 ```
 
+Now we perfom the PenDA test using the datasets and the lists preiously computed.
+The PenDA algorithm infer deregulation by comparing the changes of relative ordering
+for each genes between the tumour and the controls. If the change are too high,
+the gene is then considered deregulated.
 
-# Differential Expression Analysis
-
-# Differential Expression testing
-
-We hide the results of this chunck because it will overload the doc with unnecessary comments.
-
-```{r run-penda, message=FALSE}
-all_penda_res <- xfun::cache_rds({
-  with(penda_params$test, {
-    BiocParallel::bplapply(1:length(all_penda_datasets), function(i){
-      penda_dataset <- all_penda_datasets[[i]]
-      L_H_list <- all_L_H_list[[i]]
-      penda::penda_test(
+```{r penda-testing}
+penda_res <- xfun::cache_rds({
+    penda::penda_test(
         samples = penda_dataset$data_case, 
         controls = penda_dataset$data_ctrl, 
-        threshold = threshold_test, 
-        iterations = iterations,
+        threshold = 0.8, 
+        iterations = 60,
         L_H_list = L_H_list,
-        quant_test = quant_test,
-        factor_test = factor_test
-      )
-    })
-  })
-}, rerun = rerun_cache, file = "all_penda_res.rds", dir = result_dir)
+        quant_test = 0.0,
+        factor_test = 1.1
+    )
+}, file = "penda_res.rd", dir = result_dir)
 ```
 
-## Common Deregulations
-
-```{r common-dereg-percentage, echo = FALSE, fig.width=12, fig.height=8}
-all_penda_res <- penda.res.sort(all_penda_res, keep.sample = c(-1,-2), gene.domain = row.names(count_data) )
-
-results_combination <- combn(1:length(all_penda_res), 2, simplify = F)
-common_dereg_percentage <- purrr::imap_dfr(results_combination, function(combination, i){
-  index_res1 <- combination[1]
-  index_res2 <- combination[2]
-  res1 <- all_penda_res[[index_res1]]
-  res2 <- all_penda_res[[index_res2]]
-  down_commons <- sum(res1$down == res2$down)/length(res1$down)
-  up_commons <- sum(res1$up == res2$up)/length(res1$up)
-  data.frame(down=down_commons, up = up_commons, combination_numb = i)
-})
-
-data <- common_dereg_percentage %>%
-  tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
-  dplyr::mutate(run = as.factor(combination_numb))
-
-plot_common_dereg_percent <- ggplot(data, aes(x = run, y = percent, colour = dereg)) +
-  geom_point() +
-  geom_hline(yintercept = 0.97, colour = "red", alpha = 0.6) 
-
-plot_common_dereg_percent
-
-dereg_matrix <- get.penda.final.matrix(all_penda_res, sort = F, gene.domain = row.names(count_data) )
-```
-
-```{r dereg-perecent}
-dereg_percentage <- purrr::imap_dfr(all_penda_res, function(penda_res, run){
-  up <- colSums(penda_res$up_genes)/nrow(penda_res$up_genes)
-  down <- colSums(penda_res$down_genes)/nrow(penda_res$down_genes)
-  total <- up + down
-  data.frame(sample = names(up), up = up, down = down, total = total, run = run, row.names = NULL)
-})
-```
-
-## Deregulation Tumour Percent
+Here we plot the number of deregulated genes for each samples in the results.
 
 ```{r tumour-dereg-perecent, echo = FALSE}
-data <- dereg_percentage %>%
-  tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
-  dplyr::filter(!(sample %in% control_names)) %>%
-  dplyr::mutate(run = as.factor(run))
+dereg_percentage <- data.frame(
+    sample = colnames(penda_res$up_genes),
+    up = colSums(penda_res$up_genes)/nrow(penda_res$up_genes),
+    down = colSums(penda_res$down_genes)/nrow(penda_res$down_genes),
+    row.names = NULL
+) %>%
+    dplyr::mutate(total = up + down) %>%
+    tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent")
 
-plot_dereg_percent_tumour <- ggplot(data, aes(x = run, y = percent, colour = dereg)) +
-  geom_point() +
-  geom_hline(yintercept = c(0.05, 0.1, 0.3, 0.5), colour = "grey", linetype = "dashed") +
-  ylim(c(0,1))
+plot_dereg_percent_tumour <- ggplot(dereg_percentage, aes(x = sample, y = percent, colour = dereg, group = dereg)) +
+    geom_point() +
+    geom_line() +
+    theme(
+        axis.text.x = element_blank()
+    ) +
+    labs(
+        title = "Percentage of deregulation per sample",
+        x = "Sample",
+        y =  "Percentage of deregulation",
+        colour = "Deregulation type"
+    )
 
 plot_dereg_percent_tumour
 ```
 
-## Deregulation Controls Percentage
+## Pathway Enrichment with G:Profiler
 
-```{r controls-dereg-perecent, echo = FALSE}
-data <- dereg_percentage %>%
-  tidyr::pivot_longer(tidyr::matches("up|down|total", ignore.case = T), names_to = "dereg", values_to = "percent") %>%
-  dplyr::filter(sample %in% control_names) %>%
-  dplyr::mutate(run = as.factor(run))
+Here we perform pathway enrichment using G:Profiler, as we did in the population
+analysis. We create a list of deregulated genes for each samples then we submit
+these lists to G:Profiler.
 
-plot_dereg_percent_control <- ggplot(data, aes(x = run, y = percent, colour = dereg)) +
-  geom_point() +
-  geom_hline(yintercept = c(0.05, 0.1), colour = c("red", "blue"), linetype = "dotted") +
-  ylim(c(0,1))
+```{r run-gprofiler-individual}
+gprofiler_background <- row.names(count_normalized)
+penda_matrix <- penda_res$up_genes
+penda_matrix[penda_res$up_genes] <- 1
+penda_matrix[penda_res$down_genes] <- -1
+penda_matrix <- as.data.frame(penda_matrix)
+all_gene_list <- lapply(penda_matrix, function(x){
+  g <- row.names(penda_matrix)
+  g[which(x != 0)]
+})
+gost_res <- xfun::cache_rds({
+    gprofiler_gmt <- upload_GMT_file(reactome_gmt_path)
+    gost(
+        query = all_gene_list,
+        organism = gprofiler_gmt,
+        user_threshold = 0.05,
+        significant = F,
+        correction_method = "fdr",
+        evcodes = F,
+        custom_bg = gprofiler_background,
+        multi_query = F
+    )
+}, file = "gostres_individual.rds", dir = result_dir)
+```
 
-plot_dereg_percent_control
+Here we convert the results from G:Profiler in a more standard format called GEM.
+
+```{r individual-enrichment}
+individual_enrichment <- gost_res$result %>% 
+        dplyr::rename(pathway_id = term_id, description = term_name, sample = query) %>%
+        dplyr::mutate(
+            fdr = p_value,
+            phenotype = 1,
+            genes = ifelse(hasName(gost_res$result, "intersection"), intersection, NA)
+        ) %>%
+        dplyr::select(sample, pathway_id,description, p_value, fdr, phenotype, genes)
+```
+
+We can plot the number of pathways found deregulated for each Reactome categories
+in the enrichment results.
+
+```{r barplot-individual-category, echo = F, fig.width=12, fig.height=7}
+tcga_sample <- colnames(count_normalized)
+data <- individual_enrichment %>%
+    dplyr::filter(fdr<0.05) %>%
+    dplyr::inner_join(reactome_gs_metadata) %>%
+    dplyr::mutate(sample = factor(sample, levels = tcga_sample))
+sample_order <- data %>%
+  dplyr::count(sample, sort = T, .drop = F) %>%
+  dplyr::pull(sample)
+data$sample <- factor(data$sample, levels = sample_order, ordered = T)
+
+ggplot(data, aes(sample, fill = category)) +
+  geom_bar() +
+  # scale_fill_brewer(palette = "Paired") +
+  theme(axis.text.x = element_text(angle = 90) ) +
+  labs(
+    title = "Count of deregulated pathways by samples and Reactome category",
+    x = "Sample Name",
+    y = "Count Pathways",
+    fill = "Biological Category"
+  ) +
+  scale_x_discrete(drop = F) +
+  bar_theme
+```
+
+Here we can assess the heterogeneity among the samples using an heatmap of the
+FDR value for each pathways. Thus we can assess the samples that are similar
+between each others.
+
+```{r frequently_dereg, echo=FALSE, fig.width=8, fig.height=7}
+id_freq_dereg <-
+    individual_enrichment %>%
+    dplyr::filter(fdr<0.05) %>%
+    dplyr::count(pathway_id, description) %>%
+    dplyr::arrange(desc(n)) %>%
+    dplyr::slice(1:15) %>%
+    dplyr::pull(pathway_id)
+data <- individual_enrichment %>%
+    dplyr::filter(pathway_id %in% id_freq_dereg) %>%
+    dplyr::mutate(
+        description = stringr::str_wrap(description, width = 40)
+    )
+heatmap_pathways(data) +
+    labs(
+        title = "Heatmap frequently deregulated pathways in TCGA - Reactome" 
+    ) +
+    theme(
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()
+    )
 ```
 
 # Session Information
