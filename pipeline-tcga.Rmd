@@ -98,19 +98,30 @@ heatmap_pathways <- function(data){
 
 # Introduction
 
-This document aims to provide a reproducible analysis following the workflow 
-described in the article `Exploration of the altered mechanisms of the tumour`
-`cell using Differential Expression and Pathway Enrichment analysis: Application to glioblastoma`.
-Only data from TCGA will be used in this document as data from PDCLs are not available.
-The parameters of the different functions used for Differential Expression testing
-and pathways enrichment won't be described in this document. Links to the relevant
-documentations are available.
+This document aims to provide a reproducible analysis following the workflow  described in the article ***Exploration of the altered mechanisms of the tumour cell using Differential Expression and Pathway Enrichment analysis: Application to glioblastoma***.
+Only data from TCGA will be used in this document as data from PDCLs are not available. The parameters of the different functions used for Differential Expression testing and pathways enrichment won't be described in this document. Links to the relevant documentations are available.
 
+The workflow of analysis consist of three steps:
+
+1. Preparation of the data (import and normalization).
+2. Differential Expression analysis with DESeq2 (population level analysis) or PenDA (individual level analysis).
+3. Pathway enrichment with GSEA + G:Profiler (population level analysis) or G:Profiler only (individual level analysis).
+
+The starting point, for both the population or the individual level analysis, is the section **Dataset preparation** where the datasets and the
+associated metadata are prepared.
 
 **Note:** Here we use the function `xfun::cache_rds` to cache operation can be
 quite long. Cached results can be accessed in the `r result_dir` directory.
 
-# Dataset and Data Filtering
+# Dataset preparation
+
+The dataset that will be used is composed data from The Cancer Genome Atlas (TCGA). It consists of bulk glioblastoma RNA-Seq data generated
+during the TCGA-GBM project: an project which aimed to study and understand glioblastoma to find new treatment therapies;
+Data can be downloaded directly from the [GDC Portal](https://portal.gdc.cancer.gov/) with the manifest file `Data/tcga-dataset/TCGA-GBM-v32.0/gdc_manifest_20220718_150540.txt`. Data can also be retrieved programmatically using the 
+[TCGAbiolinks](https://doi.org/doi:10.18129/B9.bioc.TCGAbiolinks) R package available on the [BioConductor](https://bioconductor.org/) platform
+( [https://doi.org/10.1093/nar/gkv1507](https://doi.org/10.1093/nar/gkv1507) ).
+Count data have been pre-processed to generate a count matrix file at `r tcga_count_path`. Metadata where downloaded from the GDC portal and store
+in the text files `r tcga_metadata_path`.
 
 ## Prepare Count-Data
 
@@ -131,14 +142,13 @@ count_metadata <- read.table(tcga_metadata_path, sep = "\t", header = T) %>%
     dplyr::arrange(condition)
 ```
 
-**Note:** This document is an example of the workflow and is designed for a fast
+**Note:** This document is an example of the workflow and is designed for a *fast*
 execution. Thus the number of samples and genes tested is limited. Yet for a
 complete analysis, users should use the complete set of data.
 
 ```{r select-samples}
 count_metadata <- count_metadata[1:20,]
 count_data <- count_data[, count_metadata$File.ID]
-count_data <- count_data[sample(1:59317, 30000),]
 dim(count_data)
 ```
 
