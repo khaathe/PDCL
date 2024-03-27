@@ -4,7 +4,9 @@ library(tidyverse)
 library(viridis)
 library(reticulate)
 library(pheatmap)
+library(factoextra)
 
+# source("~/PhD/Project/PDCL/Code/R/gsea-analysis.R")
 source("~/PhD/Project/PDCL/Code/R/process-result.R")
 
 ####### Theming
@@ -115,9 +117,58 @@ get.signficant.pathways <- function(x, gs, threshold){
         dplyr::mutate(category = factor(category, levels = sort(unique(gs$category))))
 }
 
-####### Global Analysis
+plot.sd.clusters <- function(clustering_vector, nb_cluster = 1:10){
+    # Elbow method to determine the nb of clusters
+    sum_of_sd <- purrr::map(nb_cluster, function(x){
+        k <- kmeans(clustering_vector, centers = x, nstart = 50)
+        data.frame(nb_cluster = x, sd = k$tot.withinss)
+    }) %>%
+        purrr::list_rbind()
+    ggplot(sum_of_sd, aes(nb_cluster, sd)) +
+        geom_line() +
+        scale_x_continuous(breaks = nb_cluster) +
+        labs(
+            x = "Number of clusters",
+            y = "Squared-dsitance"
+        ) +
+        scatter_theme
+}
 
-############## Barplot Global
+make.cluster.vector <- function(enrichment, categ_count, db, gs_metadata){
+    data <- enrichment %>% 
+        dplyr::filter(fdr < threshold, db == db) %>%
+        dplyr::inner_join(gs_metadata) %>%
+        dplyr::select(sample, category) %>%
+        dplyr::mutate(category = factor(category, levels = names(categ_count))) %>%
+        dplyr::count(sample, category, .drop = F) %>%
+        tidyr::pivot_wider(names_from = category, values_from = n)
+    clustering_vector <- mapply("/", data[-1], categ_count)
+    row.names(clustering_vector) <- data$sample
+    clustering_vector <- clustering_vector[,colSums(clustering_vector) > 0]
+    clustering_vector
+}
+################################################################################
+# Analysis global enrichment
+################################################################################
+
+tcga_global_significant <- all_enrichment_tcga_global %>%
+    dplyr::filter(fdr<threshold)
+pdcl_global_significant <- all_enrichment_pdcl_global %>%
+    dplyr::filter(fdr<threshold)
+# Nb significant pathwaysin TCGA and PDCL
+nrow(tcga_global_significant)
+nrow(pdcl_global_significant)
+# Count nb significant per database
+table(tcga_global_significant$db)
+table(pdcl_global_significant$db)
+# Count nb common between TCGA and PDCL per database
+common_significant <- pdcl_global_significant %>%
+    dplyr::filter(pathway_id %in% tcga_global_significant$pathway_id) %>%
+    dplyr::pull(pathway_id)
+length(common_significant)
+table(dplyr::filter(pdcl_global_significant, pathway_id %in% common_significant)$db)
+
+############## G:Profiler vs GSEA
 common_pathway_global <- all_enrichment_global %>%
     tidyr::pivot_wider(names_from = "method", values_from = c("p_value", "fdr", "phenotype", "genes")) %>%
     dplyr::mutate(
@@ -128,6 +179,11 @@ common_pathway_global <- all_enrichment_global %>%
         )
     )
 
+common_pathway_global %>%
+    dplyr::filter(fdr_GSEA < threshold, `fdr_G:Profiler` < threshold) %>%
+    dplyr::count(sample, db)
+
+############## Barplot Global
 all_enrichment_global <- all_enrichment_global %>%
     dplyr::inner_join(common_pathway_global) %>%
     dplyr::select(pathway_id, description, p_value, fdr, phenotype, genes, sample, db, method, common) %>%
@@ -140,7 +196,7 @@ data <- all_enrichment_global %>%
     dplyr::filter(db == "kegg", fdr<threshold) %>%
     dplyr::mutate(category = factor(category, levels = sort(unique(kegg_gs_metadata$category))))
 barplot_categ_global_kegg <- ggplot(data, aes(category, fill = common)) +
-    geom_bar(position = "dodge2") + 
+    geom_bar(position = "stack") + 
     # scale_fill_brewer(palette = "Paired") +
     theme(axis.text.x = element_text(angle = 90) ) +
     labs(
@@ -155,13 +211,13 @@ barplot_categ_global_kegg <- ggplot(data, aes(category, fill = common)) +
     theme(
         panel.grid.major = element_line(colour = "grey50", linetype = "solid", linewidth = 0.1)
     )
-# ggsave(filename = "~/PhD/Article/63122c5e068151b939801c68/img/barplot-categ-global-kegg.png", plot = barplot_categ_global_kegg, width = 19, height = 14, units = "cm")
+# ggsave(filename = "~/PhD/Article/analysis-pdcl/img/barplot-categ-global-kegg.png", plot = barplot_categ_global_kegg, width = 19, height = 14, units = "cm")
 
 data <- all_enrichment_global %>%
     dplyr::filter(db == "reactome", fdr<threshold) %>%
     dplyr::mutate(category = factor(category, levels = sort(unique(reactome_gs_metadata$category))))
 barplot_categ_global_reactome <- ggplot(data, aes(category, fill = common)) +
-    geom_bar(position = "dodge2") + 
+    geom_bar(position = "stack") + 
     # scale_fill_brewer(palette = "Paired") +
     theme(axis.text.x = element_text(angle = 90) ) +
     labs(
@@ -176,7 +232,7 @@ barplot_categ_global_reactome <- ggplot(data, aes(category, fill = common)) +
     theme(
         panel.grid.major = element_line(colour = "grey50", linetype = "solid", linewidth = 0.1)
     )
-# ggsave(filename = "~/PhD/Article/63122c5e068151b939801c68/img/barplot-categ-global-reactome.png", plot = barplot_categ_global_reactome, width = 19, height = 14, units = "cm")
+# ggsave(filename = "~/PhD/Article/analysis-pdcl/img/barplot-categ-global-reactome.png", plot = barplot_categ_global_reactome, width = 19, height = 14, units = "cm")
 
 ########## Heatmap FDR Global
 
@@ -254,8 +310,65 @@ heatmap_fdr_selected_global <- ggplot(selected_pathways_global, aes(x = method, 
 
 # ggsave(filename = "~/PhD/Article/63122c5e068151b939801c68/img/heatmap-fdr-global.png", plot = heatmap_fdr_selected_global, width = 19, height = 32, units = "cm")
 
-######## PDCL
 
+################################################################################
+# Analysis Individual enrichment
+################################################################################
+
+tcga_individual_significant <- all_enrichment_tcga_personnalized %>%
+    dplyr::filter(fdr<threshold)
+pdcl_individual_significant <- all_enrichment_pdcl_personnalized %>%
+    dplyr::filter(fdr<threshold)
+# Nb significant pathwaysin TCGA and PDCL
+dplyr::n_distinct(tcga_individual_significant$pathway_id)
+dplyr::n_distinct(pdcl_individual_significant$pathway_id)
+# General stats
+pdcl_individual_significant %>%
+    dplyr::count(sample, db) %>%
+    dplyr::group_by(db) %>%
+    dplyr::summarise(
+        mean = mean(n), median = median(n), min = min(n), max = max(n),
+        q1 = quantile(n, probs = 0.25), q3 = quantile(n, probs = 0.75)
+    )
+tcga_individual_significant %>%
+    dplyr::count(sample, db) %>%
+    dplyr::group_by(db) %>%
+    dplyr::summarise(
+        mean = mean(n), median = median(n), min = min(n), max = max(n),
+        q1 = quantile(n, probs = 0.25), q3 = quantile(n, probs = 0.75)
+    )
+# Agreement between population and individual
+pdcl_individual_significant %>%
+    dplyr::filter(pathway_id %in% pdcl_global_significant$pathway_id) %>%
+    dplyr::distinct(db,pathway_id) %>%
+    dplyr::count(db)
+tcga_individual_significant %>%
+    dplyr::filter(pathway_id %in% tcga_global_significant$pathway_id) %>%
+    dplyr::distinct(db,pathway_id) %>%
+    dplyr::count(db)
+# Agreement between datasets: count nb common between TCGA and PDCL per database
+pdcl_individual_significant %>%
+    dplyr::filter(pathway_id %in% tcga_individual_significant$pathway_id) %>%
+    dplyr::distinct(pathway_id, db) %>%
+    dplyr::count(db)
+
+############## G:Profiler vs GSEA
+common_pathway_global <- all_enrichment_global %>%
+    tidyr::pivot_wider(names_from = "method", values_from = c("p_value", "fdr", "phenotype", "genes")) %>%
+    dplyr::mutate(
+        common = dplyr::case_when(
+            (fdr_GSEA < threshold) & (`fdr_G:Profiler` < threshold) ~ "Common",
+            `fdr_G:Profiler` < threshold ~ "G:Profiler",
+            fdr_GSEA < threshold ~ "GSEA"
+        )
+    )
+
+common_pathway_global %>%
+    dplyr::filter(fdr_GSEA < threshold, `fdr_G:Profiler` < threshold) %>%
+    dplyr::count(sample, db)
+
+# PDCL
+################################################################################
 ################ KEGG
 kegg_significant_pdcl_personnalized <- get.signficant.pathways(all_enrichment_pdcl_personnalized, kegg_gs_metadata, threshold) %>%
     dplyr::mutate(sample = factor(sample, levels = pdcl_sample_names))
@@ -272,7 +385,7 @@ barplot_kegg_categ_pdcl_personnalized <- ggplot(kegg_significant_pdcl_personnali
   theme(axis.text.x = element_text(angle = 90) ) +
   labs(
     title = "Count of deregulated pathways by samples and Kegg category",
-    x = "Sample Name",
+    x = "PDCL",
     y = "Count Pathways",
     fill = "Biological Category"
   ) +
@@ -295,7 +408,7 @@ barplot_reactome_categ_pdcl_personnalized <- ggplot(reactome_significant_pdcl_pe
   theme(axis.text.x = element_text(angle = 90) ) +
   labs(
     title = "Count of deregulated pathways by samples and Reactome category",
-    x = "Sample Name",
+    x = "PDCL",
     y = "Count Pathways",
     fill = "Biological Category"
   ) +
@@ -304,10 +417,10 @@ barplot_reactome_categ_pdcl_personnalized <- ggplot(reactome_significant_pdcl_pe
 
 ################ Combine barplot
 barplot_categ_pdcl_personnalized <- cowplot::plot_grid(barplot_kegg_categ_pdcl_personnalized, barplot_reactome_categ_pdcl_personnalized, nrow = 2, labels = "AUTO")
-# ggsave(filename = "~/PhD/Article/63122c5e068151b939801c68/img/barplot-categ-pdcl.png", plot = barplot_categ_pdcl_personnalized, width = 32, height = 26, units = "cm")
+# ggsave(filename = "~/PhD/Article/analysis-pdcl/img/barplot-categ-pdcl.png", plot = barplot_categ_pdcl_personnalized, width = 32, height = 26, units = "cm")
 
-######## TCGA-GBM
-
+# TCGA-GBM
+################################################################################
 ################ KEGG
 kegg_significant_tcga_personnalized <- get.signficant.pathways(all_enrichment_tcga_personnalized, kegg_gs_metadata, threshold)
 
@@ -453,8 +566,74 @@ heatmap_pathway_tcga <- cowplot::plot_grid(heatmap_kegg_pathway_tcga, heatmap_re
 # ggsave("~/PhD/Article/63122c5e068151b939801c68/img/heatmap-pathways-tcga.png", heatmap_pathway_tcga, width = 20, height = 30, units = "cm")
 # png("~/PhD/Article/63122c5e068151b939801c68/img/heatmap-pathways-tcga.png", width = 1000, height = 1000, dpi = 125); heatmap_pathway_tcga; dev.off()
 
-####### Heatmap of the contribution
+################################################################################
+# Clustering
+################################################################################
+##### Count the number of pathways per category for the vector of clustering values
+kegg_categ_path_count <- kegg_gs_metadata %>%
+    dplyr::filter(size > 15, size < 500) %>%
+    dplyr::count(category) %>%
+    dplyr::pull(n, name = "category")
+reactome_categ_path_count <- reactome_gs_metadata %>%
+    dplyr::filter(size > 15, size < 500) %>%
+    dplyr::count(category) %>%
+    dplyr::pull(n, name = "category")
+##### Make vector values for clustering
+pdcl_clustering_vector_kegg <- make.cluster.vector(all_enrichment_pdcl_personnalized, kegg_categ_path_count, "kegg", kegg_gs_metadata)
+pdcl_clustering_vector_reactome <- make.cluster.vector(all_enrichment_pdcl_personnalized, reactome_categ_path_count, "reactome", reactome_gs_metadata)
+tcga_clustering_vector_kegg <- make.cluster.vector(all_enrichment_tcga_personnalized, kegg_categ_path_count, "kegg", kegg_gs_metadata)
+tcga_clustering_vector_reactome <- make.cluster.vector(all_enrichment_tcga_personnalized, reactome_categ_path_count, "reactome", reactome_gs_metadata)
+#### Squared-distance clusters
+p1 <- plot.sd.clusters(pdcl_clustering_vector_kegg) +
+    ggtitle("PDCL - Kegg clusters")
+p2 <- plot.sd.clusters(pdcl_clustering_vector_reactome) +
+    ggtitle("PDCL - Reactome clusters")
+p3 <- plot.sd.clusters(tcga_clustering_vector_kegg) +
+    ggtitle("TCGA - Kegg clusters")
+p4 <- plot.sd.clusters(tcga_clustering_vector_reactome) +
+    ggtitle("TCGA - Reactome clusters")
+plot_sd_cluster_size <- cowplot::plot_grid(p1, p2, p3, p4, labels = "AUTO")
+##### KMeans clustering
+pdcl_kmeans_kegg <- kmeans(pdcl_clustering_vector_kegg, centers = 3, nstart = 50)
+pdcl_kmeans_reactome <- kmeans(pdcl_clustering_vector_reactome, centers = 3, nstart = 50)
+tcga_kmeans_kegg <- kmeans(tcga_clustering_vector_kegg, centers = 3, nstart = 50)
+tcga_kmeans_reactome <- kmeans(tcga_clustering_vector_reactome, centers = 3, nstart = 50)
+##### PCA 
+pdcl_pca_kegg <- prcomp(pdcl_clustering_vector_kegg, scale = T)
+pdcl_pca_reactome <- prcomp(pdcl_clustering_vector_reactome, scale = T)
+tcga_pca_kegg <- prcomp(tcga_clustering_vector_kegg, scale = T)
+tcga_pca_reactome <- prcomp(tcga_clustering_vector_reactome, scale = T)
+##### KMeans plot
+plot_kmeans_pdcl_kegg <- fviz_cluster(pdcl_kmeans_kegg, pdcl_clustering_vector_kegg, repel = TRUE) + 
+    labs(title = "PDCL - Cluster Plot K-Means KEGG") +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+    geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+plot_kmeans_pdcl_reactome <- fviz_cluster(pdcl_kmeans_reactome, pdcl_clustering_vector_reactome, repel = TRUE) + 
+    labs(title = "PDCL - Cluster Plot Reactome") +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+    geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+plot_kmeans_tcga_kegg <- fviz_cluster(tcga_kmeans_kegg, tcga_clustering_vector_kegg, geom = "point") + 
+    labs(title = "TCGA - Cluster Plot K-Means KEGG") +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+    geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+plot_kmeans_tcga_reactome <- fviz_cluster(tcga_kmeans_reactome, tcga_clustering_vector_reactome, geom = "point") + 
+    labs(title = "TCGA - Cluster Plot Reactome") +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha=0.6) + 
+    geom_vline(xintercept = 0, linetype = "dashed", alpha=0.6)
+plot_kmeans <- cowplot::plot_grid(
+    plot_kmeans_pdcl_kegg, plot_kmeans_pdcl_reactome, plot_kmeans_tcga_kegg, plot_kmeans_tcga_reactome,
+    nrow = 2, labels = 'AUTO'
+)
+ggsave("~/PhD/Article/analysis-pdcl/img/plot_cluster.png", width = 14, height = 10)
+##### Corr Plot
+plot_corr_pdcl_kegg <- fviz_pca_var(pdcl_pca_kegg, axes = c(1,2), repel = T)
+plot_corr_pdcl_reactome <- fviz_pca_var(pdcl_pca_reactome, axes = c(1,2), repel = T)
+plot_corr_tcga_kegg <- fviz_pca_var(tcga_pca_kegg, axes = c(1,2), repel = T)
+plot_corr_tcga_reactome <- fviz_pca_var(tcga_pca_reactome, axes = c(1,2), repel = T)
 
+################################################################################
+# Heatmap of the contribution
+################################################################################
 ########### For Kegg pathways
 kegg_contrib_matrix <- get.genes.in.pathway(kegg_significant_tcga_personnalized) %>%
   dplyr::count(pathway_id, gene) %>%
@@ -560,4 +739,3 @@ pheatmap::pheatmap(
   width = 14,
   height = 8
 )
-
